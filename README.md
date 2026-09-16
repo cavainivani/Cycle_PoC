@@ -71,7 +71,6 @@ server/index.js            Express 정적 서버 + /api 자리표시자
 Dockerfile                 배포용 컨테이너 이미지 (멀티스테이지)
 .dockerignore              빌드 컨텍스트 제외 목록
 scripts/azure-deploy.sh    Azure App Service 배포 자동화
-web.config                 (미사용) Windows App Service(iisnode)용
 
 src/
   app.js                   기동 지점

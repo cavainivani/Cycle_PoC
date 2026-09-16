@@ -9,7 +9,6 @@ deploy
 docs
 scripts
 _legacy-artifact.html
-web.config
 .vscode
 .idea
 .DS_Store
