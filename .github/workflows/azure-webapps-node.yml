@@ -1,0 +1,67 @@
+# =========================================================
+#  Azure App Service 배포
+# ---------------------------------------------------------
+#  사전 준비 (한 번만):
+#   1) Azure Portal > App Service > 개요 > "게시 프로필 가져오기" 로
+#      .PublishSettings 파일을 내려받는다.
+#   2) GitHub 저장소 > Settings > Secrets and variables > Actions 에서
+#      AZURE_WEBAPP_PUBLISH_PROFILE 이라는 이름으로 파일 내용을 붙여넣는다.
+#   3) 아래 AZURE_WEBAPP_NAME 을 실제 앱 이름으로 바꾼다.
+#
+#  Linux App Service 라면 포털에서 시작 명령(Startup Command)을
+#  `node server/index.js` 로 지정해 주어야 한다.
+# =========================================================
+name: Deploy to Azure App Service
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: mcb-hr-ops        # TODO: 실제 App Service 이름으로 변경
+  NODE_VERSION: '20.x'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node.js 설치
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 린트
+        run: npm run lint
+
+      - name: 빌드
+        run: npm run build
+
+      # 배포 용량을 줄이기 위해 런타임에 필요한 것만 남긴다.
+      # (dist/ 는 이미 빌드됐으므로 devDependencies 는 불필요)
+      - name: 운영 의존성만 재설치
+        run: |
+          rm -rf node_modules
+          npm ci --omit=dev
+
+      - name: 배포 패키지 구성
+        run: |
+          mkdir -p deploy
+          cp -r dist deploy/dist
+          cp -r server deploy/server
+          cp -r node_modules deploy/node_modules
+          cp package.json deploy/
+          cp web.config deploy/
+
+      - name: Azure App Service 로 배포
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: deploy

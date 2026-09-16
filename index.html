@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>인재 라이프사이클 허브</title>
+  <meta name="description" content="M. Cloud Bridge HR Ops - 인재 라이프사이클 관리 시스템">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+</head>
+<body>
+
+<div id="authRoot"></div>
+
+<div class="app-shell" style="display:none;">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark">TL</div>
+      <div>
+        <div class="name">인재 라이프사이클 허브</div>
+        <div class="sub">M. Cloud Bridge HR Ops</div>
+      </div>
+    </div>
+    <nav class="nav" id="navList"></nav>
+    <div class="sidebar-foot">
+      <div>전체 인원 <span id="sidebarHeadcount">0</span>명 관리 중</div>
+      <div style="margin-top:6px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <span id="sidebarRoleLabel"></span>
+        <button type="button" id="logoutBtn" style="background:none;border:none;color:inherit;opacity:.75;cursor:pointer;font-size:11.5px;text-decoration:underline;padding:0;">로그아웃</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+    <div id="dbBannerSlot"></div>
+    <div id="sampleBannerSlot"></div>
+    <div id="sectionRoot"></div>
+  </main>
+</div>
+
+<div id="overlayRoot"></div>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script type="module" src="/src/app.js"></script>
+</body>
+</html>
