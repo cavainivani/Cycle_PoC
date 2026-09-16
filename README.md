@@ -166,24 +166,12 @@ bash scripts/azure-deploy.sh v2
 az acr task list-runs -r acrhnfmcb --top 3 -o table
 ```
 
-### 2) GitHub Actions 자동 배포
+> GitHub Actions 자동 배포는 두지 않았습니다. 대상 테넌트가 SCM 기본 인증을
+> 막아 두어(게시 프로필 사용 불가) OIDC 연합 자격 증명이 필요한데, Entra 앱 등록과
+> 역할 할당까지 얽혀 1인 개발 단계에서는 값어치보다 품이 큽니다. 필요해지면
+> 그때 붙이면 됩니다.
 
-`main` 에 푸시하면 [`.github/workflows/azure-webapps-node.yml`](.github/workflows/azure-webapps-node.yml)
-이 린트 → 이미지 빌드/푸시 → 이미지 교체 → 헬스체크까지 수행합니다.
-
-대상 앱은 **SCM 기본 인증이 꺼져 있어 게시 프로필을 쓸 수 없습니다.**
-Azure 인증은 OIDC 연합 자격 증명을 씁니다. 필요한 GitHub Secrets:
-
-| 이름 | 용도 |
-|---|---|
-| `ACR_USERNAME` / `ACR_PASSWORD` | `acrhnfmcb` 관리자 자격 증명 |
-| `AZURE_CLIENT_ID` | 앱 등록의 클라이언트 ID |
-| `AZURE_TENANT_ID` | `033ad662-3b65-45f4-9052-5b0f8d949ff4` |
-| `AZURE_SUBSCRIPTION_ID` | `8151e37b-7d16-4a46-8b6e-aa1cbb7e64dd` |
-
-앱 등록과 연합 자격 증명을 만드는 명령은 워크플로 파일 상단 주석에 적어 두었습니다.
-
-### 3) 확인
+### 2) 확인
 
 ```
 https://mcb-hr-management-b4f7fma6gkhhecgb.koreacentral-01.azurewebsites.net/healthz
