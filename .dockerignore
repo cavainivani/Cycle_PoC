@@ -1,0 +1,16 @@
+node_modules
+dist
+deploy
+.git
+.github
+.env
+.env.local
+*.local
+docs
+scripts
+_legacy-artifact.html
+web.config
+.vscode
+.idea
+.DS_Store
+Thumbs.db
