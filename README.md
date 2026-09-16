@@ -66,8 +66,12 @@ SMOKE_URL=http://localhost:8080 npm run smoke   # npm start 로 띄운 경우
 ```
 index.html                 화면 껍데기 (사이드바 · 슬롯만)
 vite.config.js             빌드 설정
-web.config                 Windows App Service(iisnode)용
 server/index.js            Express 정적 서버 + /api 자리표시자
+
+Dockerfile                 배포용 컨테이너 이미지 (멀티스테이지)
+.dockerignore              빌드 컨텍스트 제외 목록
+scripts/azure-deploy.sh    Azure App Service 배포 자동화
+web.config                 (미사용) Windows App Service(iisnode)용
 
 src/
   app.js                   기동 지점
@@ -118,32 +122,79 @@ docs/DATA-MAP.md           ★ 화면별로 어떤 데이터를 보는지 정리
 
 ## Azure App Service 배포
 
-### 1) 한 번만 해두는 설정
+**Linux 컨테이너 방식**으로 배포합니다. Vite 빌드 결과를 Express 가 서빙하는
+이미지를 만들어 ACR 에 올리고, App Service 가 그 이미지를 바라보게 합니다.
 
-- App Service (Node 20) 생성
-- **Linux** 라면 포털 > 구성 > 일반 설정 > **시작 명령**에 `node server/index.js`
-- **Windows** 라면 `web.config` 가 알아서 처리하므로 별도 설정 불필요
+### 배포 대상
 
-### 2) GitHub Actions 로 자동 배포
+| 항목 | 값 |
+|---|---|
+| 구독 | `DataSolution(Dev)` (`8151e37b-7d16-4a46-8b6e-aa1cbb7e64dd`) |
+| 리소스 그룹 | `MCB_IS_HR_Management_RG` (Korea Central) |
+| Web App | `MCB-HR-Management` (Linux 컨테이너, F1 플랜) |
+| 레지스트리 | `acrhnfmcb.azurecr.io` — **다른 테넌트**(hnfriends) |
+| 이미지 | `acrhnfmcb.azurecr.io/mcb-hr-ops:<태그>` |
+| 컨테이너 포트 | `8080` (앱 설정 `WEBSITES_PORT`) |
 
-1. Azure Portal > App Service > 개요 > **게시 프로필 가져오기** 로 파일 다운로드
-2. GitHub 저장소 > Settings > Secrets and variables > Actions >
-   `AZURE_WEBAPP_PUBLISH_PROFILE` 이름으로 파일 내용 붙여넣기
-3. `.github/workflows/azure-webapps-node.yml` 의 `AZURE_WEBAPP_NAME` 을 실제 앱 이름으로 수정
-4. `main` 브랜치에 푸시하면 자동 배포
+레지스트리가 다른 테넌트에 있어서 App Service 는 **ACR 관리자 자격 증명**으로
+크로스 테넌트 pull 합니다. (관리 ID 는 테넌트를 넘지 못합니다.)
 
-### 3) 수동으로 올리는 경우
+### 1) 수동 배포
+
+두 테넌트 모두 로그인돼 있어야 합니다.
 
 ```bash
-npm ci
-npm run build
-npm ci --omit=dev        # 배포 용량 축소
+az login --tenant 033ad662-3b65-45f4-9052-5b0f8d949ff4   # 대상 App Service
+az login --tenant 801e055c-c6ad-4711-9dbf-6f91cdbad4ec   # ACR
 ```
 
-`dist/`, `server/`, `node_modules/`, `package.json`, `web.config` 를 App Service 에 올리고
-시작 명령을 `node server/index.js` 로 두면 됩니다.
+> 대상 테넌트는 조건부 액세스(인증 컨텍스트)를 걸어 두어, Windows 계정 브로커로는
+> 단계별 인증이 뜨지 않습니다. 막히면 `az config set core.enable_broker_on_windows=false`
+> 로 브라우저 로그인을 쓰세요.
 
-배포 확인: `https://<앱이름>.azurewebsites.net/healthz` 가 `{"ok":true,...}` 를 반환하면 정상입니다.
+```bash
+# 1. 이미지 빌드 (로컬 Docker 불필요 — ACR 에서 빌드)
+az acr build -r acrhnfmcb -t mcb-hr-ops:v2 --platform linux/amd64 --no-logs .
+
+# 2. App Service 에 연결 + 재시작
+bash scripts/azure-deploy.sh v2
+```
+
+`az acr build` 의 로그 스트리밍은 Windows cp949 콘솔에서 Vite 의 `✓` 문자 때문에
+죽습니다(azure-cli 이슈). `--no-logs` 를 쓰고 상태는 아래로 확인하세요.
+
+```bash
+az acr task list-runs -r acrhnfmcb --top 3 -o table
+```
+
+### 2) GitHub Actions 자동 배포
+
+`main` 에 푸시하면 [`.github/workflows/azure-webapps-node.yml`](.github/workflows/azure-webapps-node.yml)
+이 린트 → 이미지 빌드/푸시 → 이미지 교체 → 헬스체크까지 수행합니다.
+
+대상 앱은 **SCM 기본 인증이 꺼져 있어 게시 프로필을 쓸 수 없습니다.**
+Azure 인증은 OIDC 연합 자격 증명을 씁니다. 필요한 GitHub Secrets:
+
+| 이름 | 용도 |
+|---|---|
+| `ACR_USERNAME` / `ACR_PASSWORD` | `acrhnfmcb` 관리자 자격 증명 |
+| `AZURE_CLIENT_ID` | 앱 등록의 클라이언트 ID |
+| `AZURE_TENANT_ID` | `033ad662-3b65-45f4-9052-5b0f8d949ff4` |
+| `AZURE_SUBSCRIPTION_ID` | `8151e37b-7d16-4a46-8b6e-aa1cbb7e64dd` |
+
+앱 등록과 연합 자격 증명을 만드는 명령은 워크플로 파일 상단 주석에 적어 두었습니다.
+
+### 3) 확인
+
+```
+https://mcb-hr-management-b4f7fma6gkhhecgb.koreacentral-01.azurewebsites.net/healthz
+```
+
+`{"ok":true,"service":"mcb-hr-ops",...}` 가 나오면 정상입니다.
+
+F1(무료) 플랜이라 Always On 이 없습니다. 20분간 요청이 없으면 컨테이너가 잠들고,
+다음 요청에 **50초 안팎의 콜드 스타트**가 붙습니다. CPU 도 하루 60분 제한입니다.
+실사용 단계에서는 B1 이상으로 올리세요.
 
 ---
 
