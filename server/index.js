@@ -1,12 +1,13 @@
 /* =========================================================
-   STATIC SERVER  (Azure App Service · Node)
+   APP SERVER  (Azure App Service · Node)
    -----------------------------------------------------------
-   Vite 가 만든 dist/ 를 그대로 서빙한다. 지금은 DB 연동이 없으므로
-   서버가 하는 일은 정적 파일 전달뿐이고, 나중에 실제 API 를 붙일
-   자리는 아래 /api 라우터에 표시해 두었다.
+   두 가지를 한다.
+     1) Vite 가 만든 dist/ 를 서빙한다.
+     2) /api 아래에 Azure SQL 을 읽고 쓰는 데이터 API 를 연다.
+        (server/api.js · server/repository.js · db/schema.sql)
 
    로컬 확인:  npm run build && npm start   ->  http://localhost:8080
-   Azure:      시작 명령(Startup Command)을  node server/index.js
+   Azure:      컨테이너 CMD 가  node server/index.js
    ========================================================= */
 
 import express from "express";
@@ -14,6 +15,7 @@ import compression from "compression";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
+import { createApiRouter } from "./api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(__dirname, "..", "dist");
@@ -32,38 +34,17 @@ app.get("/healthz", (req, res) => {
 });
 
 /* ---------------------------------------------------------
-   API 자리표시자
+   데이터 API  (Azure SQL)
    -----------------------------------------------------------
-   현재 화면은 브라우저 localStorage 만 사용하므로 이 라우터는
-   호출되지 않는다. 실제 DB 를 붙일 때:
+   구현은 server/api.js 에 있고, 테이블 매핑은 server/collections.js,
+   스키마는 db/schema.sql 이다.
 
-     1) 아래 TODO 위치에 엔드포인트를 구현하고
-        (기대하는 형태는 src/data/adapters/rest.js 주석 참고)
-     2) 앱 설정에 VITE_DATA_SOURCE=rest 를 넣고 다시 빌드한다.
-
-   그 전까지는 501 을 돌려주어, 잘못 연결했을 때 조용히 실패하지
-   않고 바로 드러나게 한다.
+   화면이 이 API 를 실제로 쓰게 하려면 빌드 시점에
+   VITE_DATA_SOURCE=rest 가 설정되어 있어야 한다 (.env.example 참고).
+   기본값 local 로 빌드하면 화면은 여전히 localStorage 를 쓰고
+   이 라우터는 호출되지 않는다.
    --------------------------------------------------------- */
-const api = express.Router();
-
-// TODO: 실제 데이터 소스 연동 지점
-//   GET    /collections
-//   POST   /:collection
-//   PUT    /:collection/:id
-//   PATCH  /:collection/:id
-//   DELETE /:collection/:id
-//   GET    /settings
-//   PUT    /settings
-api.use((req, res) => {
-  res.status(501).json({
-    error: "not_implemented",
-    message: "아직 서버 데이터 API가 구현되지 않았습니다. server/index.js 의 /api 라우터를 채워 주세요.",
-    path: req.path,
-    method: req.method,
-  });
-});
-
-app.use("/api", api);
+app.use("/api", createApiRouter());
 
 /* ---------------------------------------------------------
    정적 파일

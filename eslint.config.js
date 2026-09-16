@@ -22,7 +22,7 @@ export default [
     },
   },
   {
-    files: ["server/**/*.js"],
+    files: ["server/**/*.js", "db/**/*.mjs"],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "module",
@@ -30,6 +30,7 @@ export default [
     },
     rules: {
       "no-undef": "error",
+      "no-unused-vars": ["warn", { args: "none", varsIgnorePattern: "^_" }],
     },
   },
 ];

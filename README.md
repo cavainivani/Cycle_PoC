@@ -130,40 +130,48 @@ docs/DATA-MAP.md           ★ 화면별로 어떤 데이터를 보는지 정리
 |---|---|
 | 구독 | `DataSolution(Dev)` (`8151e37b-7d16-4a46-8b6e-aa1cbb7e64dd`) |
 | 리소스 그룹 | `MCB_IS_HR_Management_RG` (Korea Central) |
-| Web App | `MCB-HR-Management` (Linux 컨테이너, F1 플랜) |
-| 레지스트리 | `acrhnfmcb.azurecr.io` — **다른 테넌트**(hnfriends) |
-| 이미지 | `acrhnfmcb.azurecr.io/mcb-hr-ops:<태그>` |
+| Web App | `MCB-HR-Management` (Linux 컨테이너, **B1** 플랜) |
+| 레지스트리 | `acrmcbhrops.azurecr.io` (Basic) |
+| 이미지 | `acrmcbhrops.azurecr.io/mcb-hr-ops:<태그>` |
+| DB | `mcb-hr-management.database.windows.net` / `MCB-HR-Management-DB` |
 | 컨테이너 포트 | `8080` (앱 설정 `WEBSITES_PORT`) |
 
-레지스트리가 다른 테넌트에 있어서 App Service 는 **ACR 관리자 자격 증명**으로
-크로스 테넌트 pull 합니다. (관리 ID 는 테넌트를 넘지 못합니다.)
+**앱·레지스트리·DB 가 전부 같은 구독**에 있습니다. 예전에는 이미지를 다른
+테넌트(hnfriends)의 `acrhnfmcb` 에서 받아왔는데, 그 레지스트리는 다른 프로젝트
+소유라 더는 쓰지 않습니다.
+
+> 이미지 pull 은 **ACR 관리자 자격 증명**을 씁니다. 관리 ID 로 pull 하는 편이
+> 깨끗하지만 `AcrPull` 역할 할당에 Owner / User Access Administrator 권한이
+> 필요한데 현재 계정은 Contributor 입니다. 권한이 생기면 전환하세요.
 
 ### 1) 수동 배포
 
-두 테넌트 모두 로그인돼 있어야 합니다.
-
 ```bash
-az login --tenant 033ad662-3b65-45f4-9052-5b0f8d949ff4   # 대상 App Service
-az login --tenant 801e055c-c6ad-4711-9dbf-6f91cdbad4ec   # ACR
+az login --tenant 033ad662-3b65-45f4-9052-5b0f8d949ff4
 ```
 
-> 대상 테넌트는 조건부 액세스(인증 컨텍스트)를 걸어 두어, Windows 계정 브로커로는
+> 이 테넌트는 조건부 액세스(인증 컨텍스트)를 걸어 두어, Windows 계정 브로커로는
 > 단계별 인증이 뜨지 않습니다. 막히면 `az config set core.enable_broker_on_windows=false`
 > 로 브라우저 로그인을 쓰세요.
 
 ```bash
 # 1. 이미지 빌드 (로컬 Docker 불필요 — ACR 에서 빌드)
-az acr build -r acrhnfmcb -t mcb-hr-ops:v2 --platform linux/amd64 --no-logs .
+az acr build -r acrmcbhrops -t mcb-hr-ops:v4 --platform linux/amd64 --no-logs .
 
 # 2. App Service 에 연결 + 재시작
-bash scripts/azure-deploy.sh v2
+bash scripts/azure-deploy.sh v4
 ```
+
+> **데이터 소스는 빌드 시점에 번들에 박힙니다.** `.dockerignore` 가 `.env.local` 을
+> 제외하므로, Dockerfile 이 `ARG VITE_DATA_SOURCE=rest` 로 직접 값을 넘깁니다.
+> 빌드 마지막 단계에서 번들을 검사해 값이 다르면 이미지 빌드가 실패합니다.
+> localStorage 모드 이미지를 만들려면 `--build-arg VITE_DATA_SOURCE=local` 을 주세요.
 
 `az acr build` 의 로그 스트리밍은 Windows cp949 콘솔에서 Vite 의 `✓` 문자 때문에
 죽습니다(azure-cli 이슈). `--no-logs` 를 쓰고 상태는 아래로 확인하세요.
 
 ```bash
-az acr task list-runs -r acrhnfmcb --top 3 -o table
+az acr task list-runs -r acrmcbhrops --top 3 -o table
 ```
 
 > GitHub Actions 자동 배포는 두지 않았습니다. 대상 테넌트가 SCM 기본 인증을
@@ -174,38 +182,94 @@ az acr task list-runs -r acrhnfmcb --top 3 -o table
 ### 2) 확인
 
 ```
-https://mcb-hr-management-b4f7fma6gkhhecgb.koreacentral-01.azurewebsites.net/healthz
+https://mcb-hr-management.mcloudbridge.co.kr/healthz        # 서버 살아있는지
+https://mcb-hr-management.mcloudbridge.co.kr/api/health/db  # DB 까지 왕복되는지
 ```
 
-`{"ok":true,"service":"mcb-hr-ops",...}` 가 나오면 정상입니다.
+각각 `{"ok":true,...}` 가 나오면 정상입니다.
 
-F1(무료) 플랜이라 Always On 이 없습니다. 20분간 요청이 없으면 컨테이너가 잠들고,
-다음 요청에 **50초 안팎의 콜드 스타트**가 붙습니다. CPU 도 하루 60분 제한입니다.
-실사용 단계에서는 B1 이상으로 올리세요.
+B1 플랜에 **Always On 이 켜져 있어** 유휴 상태에서도 컨테이너가 잠들지 않습니다.
+DB 도 Basic(프로비저닝형)이라 자동 일시중지가 없습니다. 즉 콜드 스타트가 없습니다.
+
+| 리소스 | 요금제 | 특징 |
+|---|---|---|
+| App Service | B1 (Basic) | Always On 지원, 커스텀 도메인 + SSL 가능 |
+| Azure SQL | Basic 5 DTU / 2GB | 자동 일시중지 없음, 정액 |
+| ACR | Basic | 이미지 보관 |
+
+> 예전 문서에 있던 "F1 무료 플랜 · 50초 콜드 스타트 · CPU 하루 60분" 은 더는
+> 해당하지 않습니다. DB 도 처음엔 서버리스 무료 혜택(60분 뒤 자동 일시중지,
+> 월 한도 소진 시 정지)이었으나 Basic 으로 올렸습니다.
 
 ---
 
-## 실제 DB 를 붙일 때
+## 데이터베이스 (Azure SQL)
 
-화면 코드는 **한 줄도 바꿀 필요가 없습니다.** 순서는 이렇습니다.
+화면 코드는 **한 줄도 바뀌지 않았습니다.** `VITE_DATA_SOURCE` 한 줄로 저장소가 갈립니다.
 
-1. `server/index.js` 의 `/api` 라우터에 엔드포인트를 구현합니다.
-   기대하는 형태는 [`src/data/adapters/rest.js`](src/data/adapters/rest.js) 상단 주석에 있습니다.
+| 리소스 | 값 |
+|---|---|
+| 서버 | `mcb-hr-management.database.windows.net` |
+| DB | `MCB-HR-Management-DB` (GP_S_Gen5 서버리스, 32GB) |
+| 자동 일시중지 | **60분** — 유휴 시 정지, 첫 요청에 재개 지연이 붙습니다 |
 
-   ```
-   GET    /api/collections        -> { employees:[...], contracts:[...], ... }
-   POST   /api/:collection        -> { id }
-   PUT    /api/:collection/:id
-   PATCH  /api/:collection/:id
-   DELETE /api/:collection/:id
-   GET    /api/settings
-   PUT    /api/settings
-   ```
+### 구성 파일
 
-2. `.env` 에 `VITE_DATA_SOURCE=rest` 를 넣고 다시 빌드합니다.
-   (`.env.example` 참고)
+| 파일 | 하는 일 |
+|---|---|
+| `db/schema.sql` | 테이블 DDL (멱등 — 여러 번 실행해도 안전) |
+| `db/apply-schema.mjs` | 위 DDL 을 적용하는 스크립트 (`npm run db:schema`) |
+| `server/collections.js` | **문서 ↔ 컬럼 매핑 정의. 필드를 추가할 때 고치는 유일한 곳** |
+| `server/repository.js` | 매핑만 보고 SQL 을 생성 (테이블별 손쓴 쿼리 없음) |
+| `server/db.js` | 연결 풀 · 타입 변환 · 재시도 |
+| `server/api.js` | `/api` 라우터 |
 
-테이블 설계는 [`src/data/schema.js`](src/data/schema.js) 의 컬렉션·필드 정의를 그대로 쓰면 됩니다.
+### 테이블
+
+`src/data/schema.js` 의 8개 컬렉션을 11개 테이블로 펼쳤습니다.
+
+| 테이블 | 대응 컬렉션 | 비고 |
+|---|---|---|
+| `employees` | `employees` | `probation` 스칼라는 컬럼으로 펼침, `resume`·`currentTasks` 는 JSON |
+| `probation_evaluations` | `employees.probation.evaluations[]` | 배열 순서를 `ord` 로 보존 |
+| `contracts` | `contracts` | |
+| `project_evaluations` | `project_evaluations` | |
+| `annual_evaluations` | `annual_evaluations` | `items[]` 는 JSON |
+| `regular_evaluations` | `regular_evaluations` | **평가자 컬럼 없음 (무기명)** |
+| `subsidy_programs` | `subsidy_programs` | |
+| `subsidy_applications` | `subsidy_applications` | |
+| `subsidy_application_months` | `subsidy_applications.months[]` | 수령액 집계의 원천이라 실제 테이블 |
+| `projects` | `projects` | |
+| `app_settings` | `app_settings/system` | 단일 행 |
+
+설계 기준 세 가지 — 조회·집계에 쓰이는 스칼라는 **실제 컬럼**, 모양이 자유로운 중첩 문서는
+**JSON 컬럼**, 반복되며 집계 원천이 되는 배열은 **자식 테이블**. 자세한 근거는
+`db/schema.sql` 상단 주석에 있습니다.
+
+### 스키마 적용
+
+```bash
+# 개발 PC 에서 (방화벽에 내 IP 가 열려 있어야 함)
+SQL_AUTH=sql SQL_USER=mcbsqladmin SQL_PASSWORD='...' npm run db:schema
+```
+
+### API
+
+`src/data/adapters/rest.js` 의 계약을 그대로 구현합니다.
+
+```
+GET    /api/collections        -> { employees:[...], contracts:[...], ... }
+POST   /api/:collection        -> 201 { id }
+PUT    /api/:collection/:id    -> 204
+PATCH  /api/:collection/:id    -> 204
+DELETE /api/:collection/:id    -> 204
+GET    /api/settings           -> 설정 문서 또는 null
+PUT    /api/settings           -> 204
+GET    /api/health/db          -> DB 왕복 확인 (계약 외 · 서버리스 깨우기용)
+```
+
+`PUT` 과 `PATCH` 는 서버에서 같은 연산입니다. 화면의 `store.js` 가 `deepMerge` 로 병합을
+끝낸 **레코드 전체**를 보내기 때문에, 서버가 부분 갱신을 따로 처리할 이유가 없습니다.
 
 ---
 
