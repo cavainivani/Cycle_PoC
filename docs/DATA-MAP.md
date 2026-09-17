@@ -247,6 +247,21 @@ PMO 차단 목록은 `PMO_RESTRICTED_ROUTES` (`src/config/nav.js`). 메뉴에서
 신규 직원 등록에서 연봉을 넣으면 **첫 계약이 자동 생성**됩니다(`contractTypeFor()` 로
 고용형태에 맞는 계약 구분 선택). 계약 없이 연봉만 있는 상태를 만들지 않기 위해서입니다.
 
+### 수습도 같은 방식입니다
+
+수습 관리 화면은 `probation.startDate` 가 있어야 대상으로 잡습니다
+(`probationWaitingList()`). 인력 마스터에서 재직상태만 "수습" 으로 고르면
+`probation` 이 빈 객체라, 화면에는 "수습" 이라고 보이는데 수습 관리에는
+나타나지 않았습니다.
+
+`domain/hr.js` 의 **`ensureProbationInfo(data)`** 가 이를 메웁니다 — 상태가
+"수습" 인데 `startDate` 가 없으면 **업무시작일 → 입사일 → 오늘** 순으로 골라
+시작일로 잡고 `PROBATION_MONTHS`(3개월) 뒤를 종료일로 둡니다. 신규 직원 등록과
+직원 정보 수정 양쪽에서 부릅니다.
+
+이미 시작한 수습(`startDate` 가 있음)은 건드리지 않습니다. 상태를 다시 "수습"
+으로 바꿔도 원래 시작일과 평가 이력이 유지되어야 하기 때문입니다.
+
 ### 재계약 예정일
 
 `employee-helpers.js` 의 **`renewalDateOf(contract)`** 하나만 씁니다 —

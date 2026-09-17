@@ -2,7 +2,7 @@ import { CONTRACT_STATUS_OPTIONS, EVAL_ITEMS, subsidyEmpStatusTone } from "../co
 import { addMonths, ageFromBirth, byId, ddayLabel, esc, fmtDate, fmtWon, todayISO, yearsMonthsLabel } from "../core/format.js";
 import { renderRoute, setRoute } from "../core/router.js";
 import { dbAdd, dbDelete, dbUpdate, state } from "../data/store.js";
-import { contractedEmployees, empById, gradeFromScore, gradeTone, pill, statusPill, syncEmployeeContractFields, workTypePill } from "../domain/hr.js";
+import { contractedEmployees, empById, ensureProbationInfo, gradeFromScore, gradeTone, pill, statusPill, syncEmployeeContractFields, workTypePill } from "../domain/hr.js";
 import { ui } from "../state/ui.js";
 import { ICON } from "../ui/icons.js";
 import { closeOverlay, confirmDialog, openModal, toast } from "../ui/overlay.js";
@@ -331,7 +331,9 @@ export function openEditProfileModal(e){
   byId("saveEditEmp").onclick = async ()=>{
     const data = readEmployeeForm();
     if(!data.name){ toast("이름을 입력해 주세요."); return; }
-    await dbUpdate("employees", e.id, data);
+    // 재직상태를 "수습" 으로 바꿨으면 수습 정보를 채운다.
+    // 이미 시작한 수습은 ensureProbationInfo 가 건드리지 않는다.
+    await dbUpdate("employees", e.id, ensureProbationInfo({ ...e, ...data }));
     closeOverlay(); toast("저장되었습니다."); openEmployeeDrawer(e.id, "profile");
   };
 }

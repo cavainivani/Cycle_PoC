@@ -2,7 +2,7 @@ import { DIVISION_OPTIONS, EMPLOYMENT_TYPE_OPTIONS, LOCATION_OPTIONS, POSITION_O
 import { byId, daysUntil, ddayLabel, esc, fmtDate } from "../core/format.js";
 import { setRoute } from "../core/router.js";
 import { dbAdd, state } from "../data/store.js";
-import { contractEffectiveStatus, empById, isOnLeave, pill, statusPill, syncEmployeeContractFields } from "../domain/hr.js";
+import { contractEffectiveStatus, empById, ensureProbationInfo, isOnLeave, pill, statusPill, syncEmployeeContractFields } from "../domain/hr.js";
 import { ui } from "../state/ui.js";
 import { ICON } from "../ui/icons.js";
 import { closeOverlay, openModal, toast } from "../ui/overlay.js";
@@ -268,6 +268,8 @@ export function openAddEmployeeModal(){
     data.resume = {education:[], careerHistory:[], certifications:[], skills:[]};
     data.currentTasks = [];
     data.probation = {};
+    // 재직상태를 "수습" 으로 골랐으면 수습 정보를 채워 수습 관리에 바로 잡히게 한다.
+    Object.assign(data, ensureProbationInfo(data));
     // 연봉·최종 계약일은 계약에서 파생되는 값이다. 직원 레코드에 바로 넣지 않고
     // 아래에서 첫 계약을 만든 뒤 거기서 다시 계산한다.
     const initialSalary = data.currentSalary;

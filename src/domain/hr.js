@@ -1,5 +1,5 @@
 import { SUBSIDY_APP_STATUS_TO_EMP_FIELD, SUBSIDY_EMP_STATUS_RANK } from "../config/options.js";
-import { daysUntil, esc } from "../core/format.js";
+import { addMonths, daysUntil, esc, todayISO } from "../core/format.js";
 import { dbUpdate, rawState, state } from "../data/store.js";
 import { latestContractOf, pickLatestContract, renewalDateOf } from "./employee-helpers.js";
 import { settings } from "../state/settings.js";
@@ -78,6 +78,37 @@ export async function syncEmployeeSubsidyStatus(employeeId, overrideAppId, overr
   if(emp && best && emp.subsidyEligible !== best){
     await dbUpdate("employees", employeeId, {subsidyEligible: best});
   }
+}
+
+/** 수습 기간 (개월). 서랍의 "수습 시작" 버튼과 탭 이름("수습평가(3개월)")이 쓰는 값과 같아야 한다. */
+export const PROBATION_MONTHS = 3;
+
+/**
+ * 재직상태를 "수습" 으로 두면 수습 정보를 채워 준다.
+ *
+ * 수습 관리 화면은 probation.startDate 가 있어야 대상으로 잡는다
+ * (probationWaitingList). 그런데 인력 마스터에서 재직상태만 "수습" 으로
+ * 고르면 probation 이 빈 객체라, 화면에는 "수습" 이라고 보이는데 수습
+ * 관리에는 나타나지 않았다.
+ *
+ * 이미 시작한 수습(startDate 가 있음)은 건드리지 않는다 — 나중에 상태를
+ * 다시 "수습" 으로 바꿔도 원래 시작일과 평가 이력이 유지되어야 한다.
+ */
+export function ensureProbationInfo(data){
+  if(!data || data.status !== "수습") return data;
+  const p = data.probation || {};
+  if(p.startDate) return data;
+  const start = data.workStartDate || data.hireDate || todayISO();
+  return {
+    ...data,
+    probation: {
+      ...p,
+      startDate: start,
+      endDate: addMonths(start, PROBATION_MONTHS),
+      finalDecision: p.finalDecision || "대기",
+      evaluations: p.evaluations || [],
+    },
+  };
 }
 
 /* status helpers */

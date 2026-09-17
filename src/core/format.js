@@ -3,10 +3,26 @@ export function todayISO(){ return new Date().toISOString().slice(0,10); }
 export function esc(s){ return (s==null?"":String(s)).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
 export function fmtDate(d){ if(!d) return "—"; return String(d).replaceAll("-", "."); }
 export function fmtWon(m){ if(m===undefined||m===null||m==="") return "—"; return Number(m).toLocaleString("ko-KR")+"만원"; }
+/**
+ * 날짜에 개월을 더한다. "YYYY-MM-DD" -> "YYYY-MM-DD"
+ *
+ * ★ UTC 로 계산한다.
+ *   예전에는 "T00:00:00" (로컬) 로 파싱하고 toISOString() (UTC) 으로
+ *   내보내서, KST 에서는 결과가 늘 하루씩 앞당겨졌다. 수습 3개월도
+ *   계약 만 1년도 전부 -1일이었다.
+ *
+ * ★ 말일은 다음 달 말일로 맞춘다.
+ *   1월 31일 + 1개월은 3월 3일이 아니라 2월 28일이어야 한다.
+ *   (seed.js 의 month() 헬퍼도 같은 규칙을 쓴다)
+ */
 export function addMonths(dateStr, n){
-  const d = new Date(dateStr+"T00:00:00");
+  const d = new Date(dateStr+"T00:00:00Z");
   if(isNaN(d)) return "";
-  d.setMonth(d.getMonth()+n);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth()+n);
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth()+1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, lastDay));
   return d.toISOString().slice(0,10);
 }
 export function monthsBetween(start, end){
