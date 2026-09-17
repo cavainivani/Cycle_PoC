@@ -192,6 +192,14 @@ img{ max-width:100%; }
     border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:8px; padding:8px 10px;
   }
   select.filter{ padding:8px 10px; }
+  /* 표 안에서 바로 값을 바꾸는 드롭다운 (계약 상태 등).
+     행 높이를 늘리지 않도록 폼 필드보다 작게 잡는다. */
+  select.status-select{
+    border:1px solid var(--border); background:var(--surface); color:var(--text);
+    border-radius:6px; padding:4px 8px; font-size:12.5px; cursor:pointer;
+  }
+  select.status-select:hover{ border-color:var(--accent); }
+  select.status-select:focus{ outline:2px solid var(--accent-soft); outline-offset:1px; }
   .spacer{ flex:1; }
 
   table{ width:100%; border-collapse:collapse; font-size:13px; }

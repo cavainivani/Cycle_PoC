@@ -1,8 +1,8 @@
-import { EVAL_ITEMS, subsidyEmpStatusTone } from "../config/options.js";
+import { CONTRACT_STATUS_OPTIONS, EVAL_ITEMS, subsidyEmpStatusTone } from "../config/options.js";
 import { addMonths, ageFromBirth, byId, ddayLabel, esc, fmtDate, fmtWon, todayISO, yearsMonthsLabel } from "../core/format.js";
 import { renderRoute, setRoute } from "../core/router.js";
 import { dbAdd, dbDelete, dbUpdate, state } from "../data/store.js";
-import { contractEffectiveStatus, contractedEmployees, empById, gradeFromScore, gradeTone, pill, statusPill, workTypePill } from "../domain/hr.js";
+import { contractedEmployees, empById, gradeFromScore, gradeTone, pill, statusPill, workTypePill } from "../domain/hr.js";
 import { ui } from "../state/ui.js";
 import { ICON } from "../ui/icons.js";
 import { closeOverlay, confirmDialog, openModal, toast } from "../ui/overlay.js";
@@ -147,14 +147,29 @@ export function drawerRegularEval(e){
   `;
 }
 
+/**
+ * 계약 상태를 표 안에서 바로 바꾸는 드롭다운.
+ * 지원금 신청의 진행 상태(subsidy.js)와 같은 방식이다.
+ *
+ * 저장된 status 를 그대로 보여준다 — contractEffectiveStatus() 는 종료일이
+ * 지나면 "지연" 으로 보이게 하는 표시용 계산이라, 선택값으로 쓰면 사용자가
+ * 고르지 않은 값이 저장된 것처럼 보인다.
+ */
+function contractStatusSelect(c){
+  const cur = CONTRACT_STATUS_OPTIONS.includes(c.status) ? c.status : "대기";
+  return `<select class="status-select" data-contract-status="${esc(c.id)}">
+    ${CONTRACT_STATUS_OPTIONS.map(s=>`<option ${cur===s?"selected":""}>${s}</option>`).join("")}
+  </select>`;
+}
+
 export function drawerContracts(e){
   const cs = state.contracts.filter(c=>c.employeeId===e.id).sort((a,b)=> (b.startDate||"").localeCompare(a.startDate||""));
   return `
     <div class="subhead"><h4>계약 · 연봉 이력</h4><button class="btn btn-sm btn-primary" data-add-contract>${ICON.plus}계약 등록</button></div>
     ${cs.length ? `<div class="table-scroll"><table>
       <thead><tr><th>계약구분</th><th>계약기간</th><th>연봉</th><th>사이닝보너스</th><th>채용수수료</th><th>사유</th><th>상태</th><th></th></tr></thead>
-      <tbody>${cs.map(c=>{ const eff = contractEffectiveStatus(c); return `
-        <tr><td>${esc(c.contractType||"—")}${c.isSample?'<span class="tag-sample">샘플</span>':""}</td><td class="cell-muted">${fmtDate(c.startDate)} ~ ${fmtDate(c.endDate)||"—"}</td><td class="num cell-strong">${fmtWon(c.annualSalary)}</td><td class="num cell-muted">${c.signingBonus?fmtWon(c.signingBonus):"—"}</td><td class="num cell-muted">${c.recruitingFee?fmtWon(c.recruitingFee):"—"}</td><td class="cell-muted">${esc(c.changeReason||"—")}</td><td>${pill(eff.label, eff.tone)}</td><td><button class="icon-btn" data-del-contract="${c.id}">${ICON.trash}</button></td></tr>
+      <tbody>${cs.map(c=>{ return `
+        <tr><td>${esc(c.contractType||"—")}${c.isSample?'<span class="tag-sample">샘플</span>':""}</td><td class="cell-muted">${fmtDate(c.startDate)} ~ ${fmtDate(c.endDate)||"—"}</td><td class="num cell-strong">${fmtWon(c.annualSalary)}</td><td class="num cell-muted">${c.signingBonus?fmtWon(c.signingBonus):"—"}</td><td class="num cell-muted">${c.recruitingFee?fmtWon(c.recruitingFee):"—"}</td><td class="cell-muted">${esc(c.changeReason||"—")}</td><td>${contractStatusSelect(c)}</td><td><button class="icon-btn" data-del-contract="${c.id}">${ICON.trash}</button></td></tr>
       `;}).join("")}</tbody></table></div>` : emptyState("doc","등록된 계약이 없습니다")}
   `;
 }
@@ -255,6 +270,15 @@ export function bindDrawerEvents(e){
   // contracts
   bindClick(root,"[data-add-contract]", ()=>openContractModal(e));
   root.querySelectorAll("[data-del-contract]").forEach(b=> b.onclick=async()=>{ if(await confirmDialog("계약 삭제","해당 계약 기록을 삭제할까요?")){ await dbDelete("contracts", b.dataset.delContract); refreshDrawerAfterMutate(e.id);} });
+  root.querySelectorAll("[data-contract-status]").forEach(sel=> sel.onchange = async ()=>{
+    const id = sel.dataset.contractStatus;
+    const prev = (state.contracts.find(c=>c.id===id)||{}).status;
+    const next = sel.value;
+    if(next === prev) return;
+    await dbUpdate("contracts", id, { status: next });
+    toast(`계약 상태가 "${next}"(으)로 변경되었습니다.`);
+    refreshDrawerAfterMutate(e.id);
+  });
 
   // probation
   const startBtn = root.querySelector("[data-start-probation]");
@@ -492,6 +516,26 @@ export function openRegularEvalModal(e){
   };
 }
 
+/**
+ * 계약을 등록하면 직원 마스터의 "최종 계약일 · 현재 연봉" 도 같이 맞춘다.
+ * ---------------------------------------------------------
+ * 계약 관리 화면의 대기 리스트는 계약 문서가 아니라 직원 마스터의
+ * lastContractDate 를 기준으로 계산한다(contractRenewalDueList).
+ * 예전에는 "계약 입력"(갱신) 경로에서만 이 필드를 갱신해서, "계약 등록"
+ * 으로 넣은 계약은 이력에는 보이는데 계약 관리 화면에는 나타나지 않았다.
+ *
+ * 과거 계약을 뒤늦게 입력하는 경우도 있으므로, 새 계약이 더 최신일 때만
+ * 덮어쓴다 — 그러지 않으면 최종 계약일이 뒤로 밀린다.
+ */
+async function syncEmployeeFromContract(emp, startDate, annualSalary){
+  if(!startDate) return;
+  const prev = emp.lastContractDate || "";
+  if(prev && startDate.localeCompare(prev) <= 0) return; // 더 오래된 계약이면 두지 않는다
+  const patch = { lastContractDate: startDate };
+  if(annualSalary > 0) patch.currentSalary = annualSalary;
+  await dbUpdate("employees", emp.id, patch);
+}
+
 export function openContractModal(e){
   const standalone = !e;
   const empOptions = standalone ? [...state.employees].sort((a,b)=>(a.name||"").localeCompare(b.name||"","ko")).map(emp=>`<option value="${esc(emp.id)}">${esc(emp.name)} · ${esc(emp.division||"사업부 미정")}</option>`).join("") : "";
@@ -518,15 +562,18 @@ export function openContractModal(e){
       emp = empById(empId);
       if(!emp){ toast("직원 정보를 찾을 수 없습니다."); return; }
     }
+    const start = byId("c_start").value;
+    const salary = Number(byId("c_salary").value)||0;
     await dbAdd("contracts", {
       employeeId:emp.id, employeeName:emp.name, contractType:byId("c_type").value,
-      startDate:byId("c_start").value, endDate:byId("c_end").value,
-      annualSalary:Number(byId("c_salary").value)||0,
+      startDate:start, endDate:byId("c_end").value,
+      annualSalary:salary,
       signingBonus:Number(byId("c_signingBonus").value)||0,
       recruitingFee:Number(byId("c_recruitingFee").value)||0,
       changeReason:byId("c_reason").value,
       signedDate:byId("c_signed").value, status:byId("c_status").value,
     });
+    await syncEmployeeFromContract(emp, start, salary);
     closeOverlay();
     if(standalone){ setRoute("contracts"); } else { openEmployeeDrawer(emp.id, "contracts"); }
   };

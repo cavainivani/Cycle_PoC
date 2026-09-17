@@ -5,6 +5,8 @@ export const RECRUIT_TYPE_OPTIONS = ["정직원","계약직"];
 export const LOCATION_OPTIONS = ["한국","해외"];
 export const POSITION_OPTIONS = ["선임","책임","수석","대리","과장","차장","부장","이사","대표이사"];
 export const SUBSIDY_STATUS_OPTIONS = ["대기","진행","완료"];
+// 계약 상태. schema.js 의 contracts.status 와 같은 값이어야 한다.
+export const CONTRACT_STATUS_OPTIONS = ["대기","지연","완료"];
 export function subsidyStatusTone(s){ return {"대기":"muted","진행":"info","완료":"success"}[s] || "muted"; }
 // 인력 마스터의 "지원금 대상자" 필드 값 -- 단순 예/아니오 플래그가 아니라 지원금 신청 진행 상태를 그대로 반영하는 상태값.
 // 지원금 신청(subsidy_applications)의 status(대기/진행/완료)가 바뀔 때마다 syncEmployeeSubsidyStatus()가 이 값을 갱신한다.
