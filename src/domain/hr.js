@@ -1,27 +1,53 @@
 import { SUBSIDY_APP_STATUS_TO_EMP_FIELD, SUBSIDY_EMP_STATUS_RANK } from "../config/options.js";
-import { addMonths, daysUntil, esc } from "../core/format.js";
+import { daysUntil, esc } from "../core/format.js";
 import { dbUpdate, rawState, state } from "../data/store.js";
+import { latestContractOf, renewalDateOf } from "./employee-helpers.js";
 import { settings } from "../state/settings.js";
 export function empById(id){ return state.employees.find(e=>e.id===id); }
 export function empLabel(e){ return e ? `${e.name} · ${e.division||"사업부 미정"}` : "—"; }
 export function contractedEmployees(){ return state.employees.filter(e=> e.status!=="퇴사" && state.contracts.some(c=>c.employeeId===e.id)); }
+/**
+ * 재계약이 임박했거나 지난 직원 목록.
+ *
+ * ★ 기준은 계약 문서다.
+ *   예전에는 직원 마스터의 lastContractDate 를 기준으로 삼았는데, 그 값을
+ *   채우는 경로가 "계약 입력"(갱신) 하나뿐이라 서랍에서 "계약 등록" 으로
+ *   넣은 계약은 이 화면에 영영 나타나지 않았다. 이제 계약이 단일 원천이고
+ *   직원의 lastContractDate 는 거기서 파생되는 표시용 값이다
+ *   (syncEmployeeContractFields 참고).
+ */
 export function contractRenewalDueList(){
-  // Renewal basis is the employee master's "최종 계약일" (lastContractDate) field, not the
-  // matched contract document's own startDate -- the two are usually kept in sync when a
-  // renewal is processed, but lastContractDate is the authoritative source for this calc.
-  const latestByEmp = contractedEmployees().map(e=>{
-    const cs = state.contracts.filter(c=>c.employeeId===e.id);
-    const latest = [...cs].sort((a,b)=>(b.startDate||"").localeCompare(a.startDate||""))[0];
-    return {e, c:latest};
-  });
-  return latestByEmp
-    .filter(({e})=> e.lastContractDate)
-    .map(({e,c})=>{
-      const anniv = addMonths(e.lastContractDate, 12);
-      return {e, c, anniv, d:daysUntil(anniv)};
+  return contractedEmployees()
+    .map(e=>{
+      const c = latestContractOf(e.id);
+      const anniv = renewalDateOf(c);
+      return {e, c, anniv, d: daysUntil(anniv)};
     })
-    .filter(({d})=> d!==null && d<=settings.alertDays.contract)
+    .filter(({c,anniv,d})=> c && anniv && d!==null && d<=settings.alertDays.contract)
     .sort((a,b)=> a.d-b.d);
+}
+
+/**
+ * 직원 마스터의 "현재 연봉 · 최종 계약일" 을 계약에서 다시 계산한다.
+ * 계약을 등록·삭제한 뒤에 부른다.
+ *
+ * 두 필드는 계약에서 파생되는 값이다. 직접 입력하게 두면 계약과 갈라진다 —
+ * 실제로 "계약은 있는데 직원 연봉이 0", "직원 연봉은 있는데 계약이 없음" 이
+ * 동시에 생겼었다.
+ */
+export async function syncEmployeeContractFields(employeeId){
+  const emp = (rawState.employees||[]).find(e=>e.id===employeeId);
+  if(!emp) return;
+  const latest = [...(rawState.contracts||[]).filter(c=>c.employeeId===employeeId)]
+    .sort((a,b)=>(b.startDate||"").localeCompare(a.startDate||""))[0];
+  const next = {
+    lastContractDate: latest ? (latest.startDate||"") : "",
+    currentSalary: latest ? (Number(latest.annualSalary)||0) : 0,
+  };
+  const sameDate = (emp.lastContractDate||"") === next.lastContractDate;
+  const sameSalary = (Number(emp.currentSalary)||0) === next.currentSalary;
+  if(sameDate && sameSalary) return;
+  await dbUpdate("employees", employeeId, next);
 }
 // Recomputes the employee master's "지원금 대상자" status from that employee's subsidy
 // applications, and writes it back if it changed. overrideAppId/overrideStatus reflect an

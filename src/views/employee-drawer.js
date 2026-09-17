@@ -2,7 +2,7 @@ import { CONTRACT_STATUS_OPTIONS, EVAL_ITEMS, subsidyEmpStatusTone } from "../co
 import { addMonths, ageFromBirth, byId, ddayLabel, esc, fmtDate, fmtWon, todayISO, yearsMonthsLabel } from "../core/format.js";
 import { renderRoute, setRoute } from "../core/router.js";
 import { dbAdd, dbDelete, dbUpdate, state } from "../data/store.js";
-import { contractedEmployees, empById, gradeFromScore, gradeTone, pill, statusPill, workTypePill } from "../domain/hr.js";
+import { contractedEmployees, empById, gradeFromScore, gradeTone, pill, statusPill, syncEmployeeContractFields, workTypePill } from "../domain/hr.js";
 import { ui } from "../state/ui.js";
 import { ICON } from "../ui/icons.js";
 import { closeOverlay, confirmDialog, openModal, toast } from "../ui/overlay.js";
@@ -269,7 +269,7 @@ export function bindDrawerEvents(e){
 
   // contracts
   bindClick(root,"[data-add-contract]", ()=>openContractModal(e));
-  root.querySelectorAll("[data-del-contract]").forEach(b=> b.onclick=async()=>{ if(await confirmDialog("계약 삭제","해당 계약 기록을 삭제할까요?")){ await dbDelete("contracts", b.dataset.delContract); refreshDrawerAfterMutate(e.id);} });
+  root.querySelectorAll("[data-del-contract]").forEach(b=> b.onclick=async()=>{ if(await confirmDialog("계약 삭제","해당 계약 기록을 삭제할까요?")){ await dbDelete("contracts", b.dataset.delContract); await syncEmployeeContractFields(e.id); refreshDrawerAfterMutate(e.id);} });
   root.querySelectorAll("[data-contract-status]").forEach(sel=> sel.onchange = async ()=>{
     const id = sel.dataset.contractStatus;
     const prev = (state.contracts.find(c=>c.id===id)||{}).status;
@@ -524,18 +524,9 @@ export function openRegularEvalModal(e){
  * 예전에는 "계약 입력"(갱신) 경로에서만 이 필드를 갱신해서, "계약 등록"
  * 으로 넣은 계약은 이력에는 보이는데 계약 관리 화면에는 나타나지 않았다.
  *
- * 과거 계약을 뒤늦게 입력하는 경우도 있으므로, 새 계약이 더 최신일 때만
- * 덮어쓴다 — 그러지 않으면 최종 계약일이 뒤로 밀린다.
+ * 재계산은 domain/hr.js 의 syncEmployeeContractFields 가 맡는다 — 계약이
+ * 원천이고 직원 필드는 거기서 파생된다.
  */
-async function syncEmployeeFromContract(emp, startDate, annualSalary){
-  if(!startDate) return;
-  const prev = emp.lastContractDate || "";
-  if(prev && startDate.localeCompare(prev) <= 0) return; // 더 오래된 계약이면 두지 않는다
-  const patch = { lastContractDate: startDate };
-  if(annualSalary > 0) patch.currentSalary = annualSalary;
-  await dbUpdate("employees", emp.id, patch);
-}
-
 export function openContractModal(e){
   const standalone = !e;
   const empOptions = standalone ? [...state.employees].sort((a,b)=>(a.name||"").localeCompare(b.name||"","ko")).map(emp=>`<option value="${esc(emp.id)}">${esc(emp.name)} · ${esc(emp.division||"사업부 미정")}</option>`).join("") : "";
@@ -573,7 +564,7 @@ export function openContractModal(e){
       changeReason:byId("c_reason").value,
       signedDate:byId("c_signed").value, status:byId("c_status").value,
     });
-    await syncEmployeeFromContract(emp, start, salary);
+    await syncEmployeeContractFields(emp.id);
     closeOverlay();
     if(standalone){ setRoute("contracts"); } else { openEmployeeDrawer(emp.id, "contracts"); }
   };
@@ -607,7 +598,7 @@ export function openContractRenewalModal(e, oldContract){
       signedDate:byId("cr_signed").value, status:"완료",
       renewalStatus:"완료",
     });
-    await dbUpdate("employees", e.id, { currentSalary:salary, lastContractDate:start });
+    await syncEmployeeContractFields(e.id);
     closeOverlay();
     toast("계약 사항이 등록되고 인력 마스터에 반영되었습니다.");
     setRoute("contracts");

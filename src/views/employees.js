@@ -2,13 +2,13 @@ import { DIVISION_OPTIONS, EMPLOYMENT_TYPE_OPTIONS, LOCATION_OPTIONS, POSITION_O
 import { byId, daysUntil, ddayLabel, esc, fmtDate } from "../core/format.js";
 import { setRoute } from "../core/router.js";
 import { dbAdd, state } from "../data/store.js";
-import { contractEffectiveStatus, empById, isOnLeave, pill, statusPill } from "../domain/hr.js";
+import { contractEffectiveStatus, empById, isOnLeave, pill, statusPill, syncEmployeeContractFields } from "../domain/hr.js";
 import { ui } from "../state/ui.js";
 import { ICON } from "../ui/icons.js";
 import { closeOverlay, openModal, toast } from "../ui/overlay.js";
 import { emptyState } from "./dashboard.js";
 import { renderEmpDetailShell } from "./employee-drawer.js";
-import { latestContractOf, latestProbationEvalDate } from "../domain/employee-helpers.js";
+import { latestContractOf, latestProbationEvalDate, renewalDateOf } from "../domain/employee-helpers.js";
 export let empFilters = { q:"", divisions:[], statuses:[], locations:[], recruitTypes:[], employmentTypes:[], quick:null };
 export function msArrayFor(kind){
   switch(kind){
@@ -150,6 +150,8 @@ export function renderEmployees(){
         <thead><tr><th>이름</th><th>사업부</th><th>고용형태</th><th>재직상태</th><th>입사일</th><th>수습평가일 (최근)</th><th>최종 계약일</th><th>재계약 예정일</th><th>지원금대상자</th><th></th></tr></thead>
         <tbody>${rows.map(e=>{
           const lc = latestContractOf(e.id);
+          // 계약 관리 대기 리스트와 같은 기준을 쓴다 (종료일, 없으면 시작일+12개월)
+          const renewalDate = renewalDateOf(lc);
           const lastProbDate = latestProbationEvalDate(e);
           return `<tr class="clickable" data-open-emp="${e.id}" data-open-tab="profile">
             <td class="cell-strong">${esc(e.name)}${e.isSample?'<span class="tag-sample">샘플</span>':""}</td>
@@ -159,7 +161,7 @@ export function renderEmployees(){
             <td class="cell-muted">${fmtDate(e.hireDate)}</td>
             <td class="cell-muted">${lastProbDate?fmtDate(lastProbDate):"—"}</td>
             <td class="cell-muted">${lc?fmtDate(lc.startDate):"—"}</td>
-            <td class="cell-muted">${lc && lc.endDate ? `${fmtDate(lc.endDate)} (${ddayLabel(lc.endDate)})` : "—"}</td>
+            <td class="cell-muted">${renewalDate ? `${fmtDate(renewalDate)} (${ddayLabel(renewalDate)})` : "—"}</td>
             <td>${pill(e.subsidyEligible||"아니오", subsidyEmpStatusTone(e.subsidyEligible))}</td>
             <td><button class="icon-btn" data-del-employee="${e.id}">${ICON.trash}</button></td>
           </tr>`;
@@ -200,12 +202,27 @@ export function employeeFormFields(e){
       <div class="field"><label>업무시작일</label><input type="date" id="f_workStartDate" value="${esc(e.workStartDate||"")}"></div>
       <div class="field"><label>연락처</label><input id="f_phone" value="${esc(e.phone||"")}"></div>
       <div class="field span2"><label>이메일</label><input type="email" id="f_email" value="${esc(e.email||"")}"></div>
-      <div class="field"><label>현재 연봉 (만원)</label><input type="number" id="f_currentSalary" value="${esc(e.currentSalary??"")}"></div>
-      <div class="field"><label>최종 계약일</label><input type="date" id="f_lastContractDate" value="${esc(e.lastContractDate||"")}"></div>
+      ${e.id ? `
+      <!-- 수정 화면 — 연봉·최종 계약일은 계약에서 파생되는 값이라 직접 못 고친다.
+           고칠 수 있게 두면 계약과 갈라진다(실제로 갈라졌었다). -->
+      <div class="field"><label>현재 연봉 (만원)</label><input type="number" id="f_currentSalary" value="${esc(e.currentSalary??"")}" readonly><div class="hint">계약에서 자동 계산됩니다. "계약 · 연봉" 탭에서 계약을 등록하세요.</div></div>
+      <div class="field"><label>최종 계약일</label><input type="date" id="f_lastContractDate" value="${esc(e.lastContractDate||"")}" readonly><div class="hint">가장 최근 계약의 시작일입니다.</div></div>
+      ` : `
+      <!-- 신규 등록 — 여기 넣은 값으로 첫 계약이 자동 생성된다(saveNewEmp). -->
+      <div class="field"><label>연봉 (만원)</label><input type="number" id="f_currentSalary" value=""><div class="hint">입력하면 이 값으로 <b>첫 계약이 자동 등록</b>됩니다.</div></div>
+      <div class="field"><label>계약 시작일</label><input type="date" id="f_lastContractDate" value=""><div class="hint">비우면 입사일을 씁니다.</div></div>
+      `}
       <div class="field"><label>지원금 대상자</label><select id="f_subsidyEligible">${SUBSIDY_EMP_STATUS_OPTIONS.map(o=>`<option value="${o}" ${(e.subsidyEligible||"아니오")===o?"selected":""}>${o}</option>`).join("")}</select><div class="hint">지원금 신청이 등록·진행되면 신청 상태에 따라 자동으로 갱신됩니다.</div></div>
     </div>
   `;
 }
+/** 고용형태에 맞는 계약 구분 — 신규 등록 시 첫 계약에 쓴다. */
+export function contractTypeFor(employmentType){
+  if(employmentType === "계약직") return "계약직 근로계약";
+  if(employmentType === "외주업체") return "프리랜서 계약";
+  return "정규직 근로계약";
+}
+
 export function readEmployeeForm(){
   return {
     name: byId("f_name").value.trim(),
@@ -251,7 +268,26 @@ export function openAddEmployeeModal(){
     data.resume = {education:[], careerHistory:[], certifications:[], skills:[]};
     data.currentTasks = [];
     data.probation = {};
-    await dbAdd("employees", data);
-    closeOverlay(); toast("직원이 등록되었습니다."); setRoute("employees");
+    // 연봉·최종 계약일은 계약에서 파생되는 값이다. 직원 레코드에 바로 넣지 않고
+    // 아래에서 첫 계약을 만든 뒤 거기서 다시 계산한다.
+    const initialSalary = data.currentSalary;
+    const initialStart = data.lastContractDate || data.hireDate || "";
+    data.currentSalary = 0;
+    data.lastContractDate = "";
+
+    const newId = await dbAdd("employees", data);
+    if(newId && (initialSalary > 0 || data.lastContractDate)){
+      await dbAdd("contracts", {
+        employeeId: newId, employeeName: data.name,
+        contractType: contractTypeFor(data.employmentType),
+        startDate: initialStart, endDate: "",
+        annualSalary: initialSalary,
+        changeReason: "신규", signedDate: initialStart, status: "대기",
+      });
+      await syncEmployeeContractFields(newId);
+    }
+    closeOverlay();
+    toast(initialSalary > 0 ? "직원이 등록되고 첫 계약이 함께 생성되었습니다." : "직원이 등록되었습니다.");
+    setRoute("employees");
   };
 }

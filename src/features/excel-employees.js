@@ -3,6 +3,7 @@ import { saveBlob } from "../core/download.js";
 import { byId, esc, todayISO } from "../core/format.js";
 import { setRoute } from "../core/router.js";
 import { dbAdd, state } from "../data/store.js";
+import { syncEmployeeContractFields } from "../domain/hr.js";
 import { ICON } from "../ui/icons.js";
 import { closeOverlay, openModal, toast } from "../ui/overlay.js";
 import { filteredEmployeesForMaster } from "../views/employees.js";
@@ -259,12 +260,19 @@ export async function runImport(){
     nameToId.set(data.name, id);
   }
   let contractOk = 0;
+  const touched = new Set();
   for(const data of contracts){
     const employeeId = nameToId.get(data.employeeName);
     if(!employeeId) continue;
     const {employeeName, empNo, ...rest} = data;
     await dbAdd("contracts", {employeeId, employeeName, ...rest});
+    touched.add(employeeId);
     contractOk++;
+  }
+  // 계약이 들어온 직원은 연봉·최종 계약일을 계약에서 다시 계산한다.
+  // (계약이 원천 — domain/hr.js 의 syncEmployeeContractFields 주석 참고)
+  for(const employeeId of touched){
+    await syncEmployeeContractFields(employeeId);
   }
   closeOverlay();
   toast(`직원 ${employees.length}건, 계약 ${contractOk}건이 업로드되었습니다.`);
