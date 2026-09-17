@@ -294,9 +294,19 @@ export function createApiRouter() {
     if (!body) return;
     if (!(await ensureInScope(req, res, path, req.params.id))) return;
     warnUnmapped(path, body);
-    const ok = await repo.replace(path, req.params.id, body);
-    if (!ok) {
+    const outcome = await repo.replace(path, req.params.id, body);
+    if (outcome === "notfound") {
       res.status(404).json({ error: "not_found", collection: path, id: req.params.id });
+      return;
+    }
+    if (outcome === "conflict") {
+      // 내가 읽은 뒤로 다른 사람이 저장했다. 덮어쓰지 않고 돌려보낸다.
+      res.status(409).json({
+        error: "conflict",
+        message: "다른 사람이 먼저 저장했습니다. 최신 내용을 불러온 뒤 다시 시도해 주세요.",
+        collection: path,
+        id: req.params.id,
+      });
       return;
     }
     res.status(204).end();

@@ -34,6 +34,13 @@ function childOrderBy(child) {
    읽기
    --------------------------------------------------------- */
 
+/**
+ * 동시 편집 감지용 버전 필드 이름.
+ * 밑줄로 시작해 "사용자 데이터가 아니라 메타데이터" 임을 드러낸다.
+ * 화면은 이 값을 읽지 않고, 받은 그대로 되돌려 보내기만 한다.
+ */
+export const VERSION_FIELD = "_version";
+
 function buildRecord(row, def) {
   const rec = { id: row.id };
   for (const [field, colDef] of Object.entries(def.columns)) {
@@ -42,6 +49,9 @@ function buildRecord(row, def) {
     if (value !== null) setPath(rec, field, value);
   }
   ensureNestedRoots(rec, def);
+  if (row.row_version !== null && row.row_version !== undefined) {
+    rec[VERSION_FIELD] = String(row.row_version);
+  }
   return rec;
 }
 
@@ -58,7 +68,13 @@ function buildChildRecord(row, childDef) {
 async function loadCollection(pool, path) {
   const def = COLLECTIONS[path];
   const cols = Object.values(def.columns).map((c) => c.col).join(", ");
-  const rows = (await pool.request().query(`SELECT id, ${cols} FROM dbo.${def.table} ORDER BY seq`)).recordset;
+  // ROWVERSION 은 binary(8) 이라 JSON 으로 바로 못 싣는다. BIGINT 로 바꿔 내려준다.
+  const rows = (
+    await pool.request().query(
+      `SELECT id, ${cols}, CONVERT(BIGINT, row_version) AS row_version
+         FROM dbo.${def.table} ORDER BY seq`
+    )
+  ).recordset;
   const records = rows.map((r) => buildRecord(r, def));
 
   for (const [field, child] of Object.entries(def.children || {})) {
@@ -184,7 +200,7 @@ export async function owningEmployeeId(path, id) {
 /** 매핑에 없는 키를 찾아낸다 (개발 중 실수로 필드를 흘리는 것 방지) */
 export function unmappedKeys(path, record) {
   const def = COLLECTIONS[path];
-  const known = new Set(["id"]);
+  const known = new Set(["id", VERSION_FIELD]);
   Object.keys(def.columns).forEach((f) => known.add(f.split(".")[0]));
   Object.keys(def.children || {}).forEach((f) => known.add(f.split(".")[0]));
   return Object.keys(record || {}).filter((k) => !known.has(k));
@@ -292,10 +308,23 @@ export async function insert(path, record) {
 
 /**
  * PUT/PATCH /api/:collection/:id — 레코드 전체 교체.
- * 없는 id 면 false 를 돌려준다(라우터가 404 로 바꾼다).
+ *
+ * 돌려주는 값
+ *   "ok"        저장됨
+ *   "notfound"  그 id 가 없다
+ *   "conflict"  그 사이 다른 사람이 저장했다 (또는 버전을 안 보냈다)
+ *
+ * ★ 왜 버전을 확인하는가
+ *   화면은 "레코드 전체" 를 보낸다. 두 사람이 같은 직원을 열어 각자 다른
+ *   필드를 고치면, 나중에 저장한 쪽이 자기 사본의 옛 값까지 함께 써 넣어
+ *   앞사람의 수정을 조용히 덮는다. 서버는 어느 필드를 "바꾸려던" 것이고
+ *   어느 필드가 "안 건드린" 것인지 구분할 수 없다 — 둘 다 똑같이 생겼다.
+ *   그래서 "내가 읽은 뒤로 이 행이 바뀌었는가" 를 대신 확인한다.
  */
 export async function replace(path, id, record) {
   const def = COLLECTIONS[path];
+  const version = record ? record[VERSION_FIELD] : undefined;
+
   return withRetry(async () => {
     const pool = await getPool();
     const tx = new sql.Transaction(pool);
@@ -303,18 +332,36 @@ export async function replace(path, id, record) {
     try {
       const req = new sql.Request(tx);
       req.input("id", sql.NVarChar(50), id);
+
+      // 버전을 안 보냈으면 덮어쓰기를 허용하지 않는다. 허용하면 보호가
+      // 있으나 마나 해진다 — 버전을 빼고 보내는 것만으로 우회된다.
+      let versionClause = "";
+      if (version === undefined || version === null || version === "") {
+        await tx.rollback();
+        return "conflict";
+      }
+      req.input("version", sql.BigInt, String(version));
+      versionClause = " AND CONVERT(BIGINT, row_version) = @version";
+
       const assignments = updatable(addParams(req, def, record));
       const setClause = assignments.map((a) => `${a.col} = @${a.param}`).join(", ");
       const result = await req.query(
-        `UPDATE dbo.${def.table} SET ${setClause}, updated_at = SYSUTCDATETIME() WHERE id = @id`
+        `UPDATE dbo.${def.table} SET ${setClause}, updated_at = SYSUTCDATETIME()
+          WHERE id = @id${versionClause}`
       );
+
       if (result.rowsAffected[0] === 0) {
+        // 0행인 이유가 두 가지다 — 행이 없거나, 버전이 어긋났거나.
+        const check = new sql.Request(tx);
+        check.input("id", sql.NVarChar(50), id);
+        const exists = (await check.query(`SELECT 1 AS x FROM dbo.${def.table} WHERE id = @id`)).recordset.length > 0;
         await tx.rollback();
-        return false;
+        return exists ? "conflict" : "notfound";
       }
+
       await rewriteChildren(tx, def, id, record);
       await tx.commit();
-      return true;
+      return "ok";
     } catch (err) {
       try { await tx.rollback(); } catch { /* 무시 */ }
       throw err;

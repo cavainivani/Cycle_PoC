@@ -37,6 +37,17 @@ export class UnauthorizedError extends Error {
   }
 }
 
+/**
+ * 409 — 내가 화면을 연 뒤로 다른 사람이 그 레코드를 저장했다.
+ * 그대로 밀어붙이면 남의 수정을 덮으므로, 서버가 거절하고 여기로 온다.
+ */
+export class ConflictError extends Error {
+  constructor(message) {
+    super(message || "다른 사람이 먼저 저장했습니다.");
+    this.name = "ConflictError";
+  }
+}
+
 async function request(method, path, body) {
   const res = await fetch(BASE + path, {
     method,
@@ -47,6 +58,14 @@ async function request(method, path, body) {
   });
   if (res.status === 401) {
     throw new UnauthorizedError();
+  }
+  if (res.status === 409) {
+    let message = null;
+    try {
+      const body = JSON.parse(await res.text());
+      message = body && body.message;
+    } catch { /* 본문이 없거나 JSON 이 아니면 기본 문구를 쓴다 */ }
+    throw new ConflictError(message);
   }
   if (!res.ok) {
     throw new Error(`${method} ${BASE}${path} 실패 (${res.status})`);

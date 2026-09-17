@@ -323,7 +323,48 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_subsidy_application_mo
 GO
 
 /* ---------------------------------------------------------
-   11) 앱 설정 — 단일 행 (schema.js 의 SETTINGS_DOC)
+   11) 동시 편집 방지 — 낙관적 동시성 제어용 버전 컬럼
+   ---------------------------------------------------------
+   어댑터는 "레코드 전체" 를 보낸다. 그래서 두 사람이 같은 직원을
+   열어 각자 다른 필드를 고치면, 나중에 저장한 쪽이 자기 사본에 있던
+   옛 값까지 함께 써 넣어 앞사람의 수정을 조용히 덮는다.
+
+   ROWVERSION 은 행이 바뀔 때마다 DB 가 자동으로 올려 주는 값이다.
+   조회할 때 같이 내려주고, 저장할 때 돌려받아
+     UPDATE ... WHERE id = @id AND row_version = @version
+   으로 확인한다. 그 사이 누가 저장했으면 0행이 되고, 서버는 409 를
+   돌려준다. (server/repository.js 의 replace 참고)
+
+   ROWVERSION 은 INSERT/UPDATE 시 값을 넣을 수 없다 — DB 가 직접
+   관리한다. 그래서 컬럼 목록에서 항상 빠진다.
+   --------------------------------------------------------- */
+IF COL_LENGTH('dbo.employees', 'row_version') IS NULL
+  ALTER TABLE dbo.employees ADD row_version ROWVERSION;
+GO
+IF COL_LENGTH('dbo.contracts', 'row_version') IS NULL
+  ALTER TABLE dbo.contracts ADD row_version ROWVERSION;
+GO
+IF COL_LENGTH('dbo.project_evaluations', 'row_version') IS NULL
+  ALTER TABLE dbo.project_evaluations ADD row_version ROWVERSION;
+GO
+IF COL_LENGTH('dbo.annual_evaluations', 'row_version') IS NULL
+  ALTER TABLE dbo.annual_evaluations ADD row_version ROWVERSION;
+GO
+IF COL_LENGTH('dbo.regular_evaluations', 'row_version') IS NULL
+  ALTER TABLE dbo.regular_evaluations ADD row_version ROWVERSION;
+GO
+IF COL_LENGTH('dbo.subsidy_programs', 'row_version') IS NULL
+  ALTER TABLE dbo.subsidy_programs ADD row_version ROWVERSION;
+GO
+IF COL_LENGTH('dbo.subsidy_applications', 'row_version') IS NULL
+  ALTER TABLE dbo.subsidy_applications ADD row_version ROWVERSION;
+GO
+IF COL_LENGTH('dbo.projects', 'row_version') IS NULL
+  ALTER TABLE dbo.projects ADD row_version ROWVERSION;
+GO
+
+/* ---------------------------------------------------------
+   12) 앱 설정 — 단일 행 (schema.js 의 SETTINGS_DOC)
    --------------------------------------------------------- */
 IF OBJECT_ID('dbo.app_settings', 'U') IS NULL
 CREATE TABLE dbo.app_settings (

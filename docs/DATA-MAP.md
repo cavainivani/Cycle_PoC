@@ -212,6 +212,12 @@ PMO 차단 목록은 `PMO_RESTRICTED_ROUTES` (`src/config/nav.js`). 메뉴에서
 | 인증 | 로그인 없이는 `/api` 전부 | `401` |
 | 쓰기 권한 | 역할이 접근할 수 없는 화면의 컬렉션 | `403` |
 | 사업부 범위 | `applyDivisionScope()` 와 같은 규칙을 서버가 다시 적용 | `404` / `403` |
+| 동시 편집 | 내가 읽은 뒤 남이 저장한 레코드 덮어쓰기 | `409` |
+
+`dbUpdate` 가 보내는 레코드에는 `_version` 이 들어 있습니다. `load()` 로 받은 값이
+`rawState` 에 남아 있다가 `deepMerge` 를 타고 그대로 돌아가는 구조라, 화면 코드는
+이 값을 몰라도 됩니다. **다만 레코드를 직접 만들어 `dbUpdate` 에 넘기면 안 됩니다**
+— `_version` 이 빠져 409 가 납니다. 항상 `state` 에서 읽은 것을 기반으로 고치세요.
 
 `applyDivisionScope()` 의 규칙을 고치면 `server/repository.js` 의 `scopeFor()` /
 `loadAll()` 도 같이 고쳐야 합니다. 두 곳이 어긋나면 화면과 API 가 다른 데이터를 봅니다.

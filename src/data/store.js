@@ -115,6 +115,11 @@ function isUnauthorized(err){
   return !!err && (err.name === "UnauthorizedError" || /401/.test(String(err.message||"")));
 }
 
+/** 내가 화면을 연 뒤로 다른 사람이 같은 레코드를 저장했다 */
+function isConflict(err){
+  return !!err && (err.name === "ConflictError" || /409/.test(String(err.message||"")));
+}
+
 function recordById(path, id){
   return (rawState[PATH_KEY[path]] || []).find(d=> d.id===id) || {};
 }
@@ -128,6 +133,15 @@ async function mutate(fn){
   }catch(err){
     if(isUnauthorized(err)){
       if(onUnauthorized) onUnauthorized();
+      return null;
+    }
+    if(isConflict(err)){
+      // 남의 수정을 덮지 않으려고 서버가 거절했다. 최신 내용을 가져와
+      // 화면을 갱신하고, 무엇이 일어났는지 알린다. 입력값은 버려진다 —
+      // 조용히 덮어쓰는 것보다 다시 입력하는 편이 낫다.
+      await reloadAll();
+      requestRender();
+      toast(err.message || "다른 사람이 먼저 저장했습니다. 최신 내용을 불러왔으니 다시 확인해 주세요.");
       return null;
     }
     storeStatus.error = err && err.message ? err.message : String(err);
