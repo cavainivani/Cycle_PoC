@@ -19,6 +19,7 @@ export function openEmployeeDrawer(empId, tab){
   const e = empById(empId);
   if(!e){ toast("직원 정보를 찾을 수 없습니다."); return; }
   ui.drawerEmpId = empId; ui.drawerTab = tab || "profile";
+  ui.editingProfile = false;   // 다른 직원을 열면 편집 모드는 풀린다
   setRoute("employees");
 }
 export function renderEmpDetailShell(e){
@@ -38,9 +39,24 @@ export function renderEmpDetailShell(e){
 }
 
 export function drawerProfile(e){
+  // 수정은 모달로 넘어가지 않고 이 자리에서 한다. 편집 중에는 각 칸이
+  // 입력칸으로 바뀌고 아래에 "완료" 가 생기며, 저장하면 다시 사라진다.
+  const editing = !!ui.editingProfile;
   return `
-    <div class="subhead"><h4>기본 정보</h4><button class="btn btn-sm" data-edit-profile>${ICON.edit}수정</button></div>
-    <div class="form-grid" style="font-size:13px;">
+    <div class="subhead">
+      <h4>기본 정보</h4>
+      ${editing
+        ? `<span class="hint" style="margin:0;">고칠 항목을 바로 수정한 뒤 완료를 누르세요</span>`
+        : `<button class="btn btn-sm" data-edit-profile>${ICON.edit}수정</button>`}
+    </div>
+    ${editing ? `
+      ${employeeFormFields(e)}
+      <div class="drawer-foot" style="display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn" data-cancel-profile>취소</button>
+        <button class="btn btn-primary" data-save-profile>${ICON.check||""}완료</button>
+      </div>
+    ` : `
+    <div class="form-grid info-grid" style="font-size:13px;">
       ${infoField("이름", e.name)}${infoField("사번", e.empNo)}
       ${infoField("사업부", e.division)}
       ${infoField("직급/직책", e.position)}${infoField("고용형태", e.employmentType)}
@@ -49,10 +65,10 @@ export function drawerProfile(e){
       ${infoField("생년월일", e.birthDate ? `${fmtDate(e.birthDate)} (만 ${ageFromBirth(e.birthDate)}세)` : "—")}
       ${infoField("입사일", fmtDate(e.hireDate))}${infoField("업무시작일", e.workStartDate ? fmtDate(e.workStartDate) : "—")}
       ${infoField("근속기간", yearsMonthsLabel(e.hireDate))}${infoField("연락처", e.phone)}
-      ${infoField("현재 연봉", e.currentSalary?fmtWon(e.currentSalary):"—")}${infoField("최종 계약일", e.lastContractDate?fmtDate(e.lastContractDate):"—")}
+      ${infoField("현재 연봉", e.currentSalary?fmtWon(e.currentSalary):"—", false, "계약에서 자동 계산")}${infoField("최종 계약일", e.lastContractDate?fmtDate(e.lastContractDate):"—", false, "계약에서 자동 계산")}
       ${infoField("지원금 대상자", pill(e.subsidyEligible||"아니오", subsidyEmpStatusTone(e.subsidyEligible)))}
       ${infoField("이메일", e.email, true)}
-    </div>
+    </div>`}
     <div class="divider"></div>
     <div class="subhead"><h4>담당 업무</h4><button class="btn btn-sm" data-add-task>${ICON.plus}업무 추가</button></div>
     ${(e.currentTasks||[]).length ? (e.currentTasks||[]).map((t,i)=>`
@@ -65,8 +81,16 @@ export function drawerProfile(e){
       </div>`).join("") : emptyState("folder","등록된 업무가 없습니다")}
   `;
 }
-export function infoField(label, val, span2){
-  return `<div class="field ${span2?"span2":""}"><label>${esc(label)}</label><div>${val===undefined||val===null||val===""?"—":val}</div></div>`;
+/**
+ * 읽기 모드의 한 칸. 테두리를 둘러 어디까지가 한 항목인지 눈에 보이게 한다.
+ * note 를 주면 "왜 여기서 못 고치는지" 같은 설명을 작게 덧붙인다.
+ */
+export function infoField(label, val, span2, note){
+  return `<div class="field info-box ${span2?"span2":""}">
+    <label>${esc(label)}</label>
+    <div class="info-val">${val===undefined||val===null||val===""?"—":val}</div>
+    ${note?`<div class="hint" style="margin-top:4px;">${esc(note)}</div>`:""}
+  </div>`;
 }
 
 export function drawerResume(e){
@@ -231,9 +255,27 @@ export function drawerProbation(e){
 export function bindDrawerEvents(e){
   const root = byId("drawerBody");
 
-  // profile
+  // profile — 그 자리에서 수정한다 (모달로 넘어가지 않는다)
   const editBtn = root.querySelector("[data-edit-profile]");
-  if(editBtn) editBtn.onclick = ()=> openEditProfileModal(e);
+  if(editBtn) editBtn.onclick = ()=>{ ui.editingProfile = true; renderRoute(); };
+
+  const cancelProfileBtn = root.querySelector("[data-cancel-profile]");
+  if(cancelProfileBtn) cancelProfileBtn.onclick = ()=>{ ui.editingProfile = false; renderRoute(); };
+
+  const saveProfileBtn = root.querySelector("[data-save-profile]");
+  if(saveProfileBtn){
+    // 근무형태 "기타" 를 고르면 지원금 항목 칸이 열리는 동작은 폼과 함께 다시 붙인다.
+    bindLeaveProgramToggle();
+    saveProfileBtn.onclick = async ()=>{
+      const data = readEmployeeForm();
+      if(!data.name){ toast("이름을 입력해 주세요."); return; }
+      // 재직상태를 "수습" 으로 바꿨으면 수습 정보를 채운다.
+      await dbUpdate("employees", e.id, ensureProbationInfo({ ...e, ...data }));
+      ui.editingProfile = false;   // 완료 버튼은 여기서 사라진다
+      toast("저장되었습니다.");
+      refreshDrawerAfterMutate(e.id);
+    };
+  }
   const addTaskBtn = root.querySelector("[data-add-task]");
   if(addTaskBtn) addTaskBtn.onclick = ()=> openAddTaskModal(e);
   root.querySelectorAll("[data-del-task]").forEach(b=> b.onclick = async ()=>{

@@ -84,13 +84,13 @@ export function bindSectionEvents(){
   }));
 
   // employee detail screen (인력 마스터 목록 → 상세 대체 화면)
-  root.querySelectorAll("[data-dtab]").forEach(b=> b.onclick = ()=>{ ui.drawerTab = b.dataset.dtab; renderRoute(); });
+  root.querySelectorAll("[data-dtab]").forEach(b=> b.onclick = ()=>{ ui.drawerTab = b.dataset.dtab; ui.editingProfile = false; renderRoute(); });
   if(ui.drawerEmpId){ const se = empById(ui.drawerEmpId); if(se && byId("drawerBody")) bindDrawerEvents(se); }
 
   // 목록 → 상세 화면 대체에서 "목록으로" 뒤로가기
   root.querySelectorAll("[data-close-detail]").forEach(b=> b.onclick = ()=>{
     const kind = b.dataset.closeDetail;
-    if(kind==="employees") ui.drawerEmpId = null;
+    if(kind==="employees"){ ui.drawerEmpId = null; ui.editingProfile = false; }
     else if(kind==="subsidyPrograms") ui.selectedSubsidyProgramId = null;
     renderRoute();
   });

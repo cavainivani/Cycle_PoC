@@ -18,6 +18,8 @@ export const ui = {
   drawerEmpId: null,
   /** 서랍 안에서 선택된 탭 키 (DRAWER_TABS 참조) */
   drawerTab: "profile",
+  /** 기본 정보를 그 자리에서 고치는 중인지 (true 면 입력칸 + "완료" 버튼) */
+  editingProfile: false,
 
   /** 인력 마스터 필터 드롭다운 중 열려 있는 것 */
   openFilterDropdown: null, // "division" | "status" | "location" | "recruitType" | "employmentType" | null
