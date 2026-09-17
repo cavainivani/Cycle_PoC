@@ -1,5 +1,5 @@
 import { byId, esc } from "../core/format.js";
-import { renderNav, renderRoute } from "../core/router.js";
+import { renderNav, renderRoute, resetRoute } from "../core/router.js";
 import { adapter, applyDivisionScope, clearLoadedData, reloadAll } from "../data/store.js";
 import { loadSystemSettings } from "../data/settings-store.js";
 import { authState, settings } from "../state/settings.js";
@@ -100,6 +100,8 @@ export async function logout(){
   }catch(err){ /* 세션 정리는 실패해도 화면은 로그아웃시킨다 */ }
   Object.assign(authState, { loggedIn:false, role:null });
   ui.loginError = "";
+  // 다음 사람이 이전 사용자가 보던 화면에서 시작하지 않게 한다.
+  resetRoute();
   // 로그아웃 후에도 메모리에 데이터가 남아 있지 않게 비운다.
   clearLoadedData();
   applyDivisionScope();
@@ -110,6 +112,7 @@ export async function logout(){
 export function forceLogout(message){
   Object.assign(authState, { loggedIn:false, role:null });
   ui.loginError = message || "세션이 만료되었습니다. 다시 로그인해 주세요.";
+  resetRoute();
   clearLoadedData();
   applyDivisionScope();
   renderAuthGate();

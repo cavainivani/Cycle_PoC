@@ -17,12 +17,24 @@ import { renderSubsidyProgramsView } from "../views/subsidy-programs.js";
 import { renderSubsidyView, subsidySectionData } from "../views/subsidy.js";
 import { renderSystemSettingsView } from "../views/system-settings.js";
 export let route = "dashboard";
+/** 현재 역할이 볼 수 없는 화면이면 대시보드로 바꾼다. */
+function allowedRoute(r){
+  return (authState.role==="pmo" && PMO_RESTRICTED_ROUTES.includes(r)) ? "dashboard" : r;
+}
+
 export function setRoute(r){
-  if(authState.role==="pmo" && PMO_RESTRICTED_ROUTES.includes(r)){
-    toast("PMO 계정은 접근할 수 없는 화면입니다.");
-    r = "dashboard";
-  }
-  route = r; renderNav(); renderRoute();
+  const allowed = allowedRoute(r);
+  if(allowed !== r) toast("PMO 계정은 접근할 수 없는 화면입니다.");
+  route = allowed; renderNav(); renderRoute();
+}
+
+/**
+ * 로그아웃 시 화면을 처음으로 되돌린다.
+ * route 는 모듈 변수라 로그아웃해도 남는다. 초기화하지 않으면 다음에
+ * 로그인한 사람이 이전 사용자가 보던 화면에서 시작한다.
+ */
+export function resetRoute(){
+  route = "dashboard";
 }
 export function navCountFor(countKey){
   if(countKey==="employees") return state.employees.filter(e=> e.status!=="퇴사").length;
@@ -81,6 +93,11 @@ export function renderSampleBanner(){
 }
 
 export function renderRoute(){
+  // ★ 그리기 직전에 한 번 더 막는다.
+  //   setRoute 에만 검사가 있으면 빠져나가는 길이 있다 — route 는 모듈
+  //   변수라 로그아웃해도 남으므로, 관리자가 시스템 설정을 보던 상태에서
+  //   PMO 로 바꿔 로그인하면 setRoute 를 거치지 않고 그대로 그려졌다.
+  route = allowedRoute(route);
   renderDbBanner();
   renderSampleBanner();
   const root = byId("sectionRoot");
