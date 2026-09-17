@@ -7,7 +7,7 @@ import { ui } from "../state/ui.js";
 import { ICON } from "../ui/icons.js";
 import { closeOverlay, confirmDialog, openModal, toast } from "../ui/overlay.js";
 import { emptyState } from "./dashboard.js";
-import { bindLeaveProgramToggle, employeeFormFields, readEmployeeForm } from "./employees.js";
+import { bindLeaveProgramToggle, contractTypeFor, employeeFormFields, readEmployeeForm } from "./employees.js";
 import { probationOpinionTone } from "./evaluations.js";
 export const DRAWER_TABS = [
   {key:"profile", label:"기본정보 · 업무"},
@@ -527,16 +527,27 @@ export function openRegularEvalModal(e){
  * 재계산은 domain/hr.js 의 syncEmployeeContractFields 가 맡는다 — 계약이
  * 원천이고 직원 필드는 거기서 파생된다.
  */
+
+/** 연봉 입력칸 아래에 현재 연봉을 보여 준다 (무엇을 바꾸는지 알 수 있게) */
+function currentSalaryHint(emp){
+  return emp.currentSalary
+    ? `현재 연봉 ${fmtWon(emp.currentSalary)} — 바꾸면 이 계약의 연봉이 직원의 현재 연봉이 됩니다.`
+    : "등록된 연봉이 없습니다. 입력한 값이 직원의 현재 연봉이 됩니다.";
+}
+
 export function openContractModal(e){
   const standalone = !e;
   const empOptions = standalone ? [...state.employees].sort((a,b)=>(a.name||"").localeCompare(b.name||"","ko")).map(emp=>`<option value="${esc(emp.id)}">${esc(emp.name)} · ${esc(emp.division||"사업부 미정")}</option>`).join("") : "";
+  const typeOptions = (sel)=> ["정규직 근로계약","연봉계약","수습계약","계약직 근로계약","프리랜서 계약"]
+    .map(t=>`<option ${sel===t?"selected":""}>${t}</option>`).join("");
+
   openModal("계약 등록", `
     <div class="form-grid">
-      ${standalone ? `<div class="field span2"><label>직원 *</label><select id="c_employee"><option value="">직원 마스터에서 선택</option>${empOptions}</select></div>` : ""}
-      <div class="field span2"><label>계약 구분</label><select id="c_type">${["정규직 근로계약","연봉계약","수습계약","계약직 근로계약","프리랜서 계약"].map(t=>`<option>${t}</option>`).join("")}</select></div>
+      ${standalone ? `<div class="field span2"><label>직원 *</label><select id="c_employee"><option value="">직원 마스터에서 선택</option>${empOptions}</select><div class="hint" id="c_empHint">직원을 선택하면 현재 연봉과 계약 구분이 채워집니다.</div></div>` : ""}
+      <div class="field span2"><label>계약 구분</label><select id="c_type">${typeOptions(e ? contractTypeFor(e.employmentType) : null)}</select></div>
       <div class="field"><label>계약 시작일</label><input type="date" id="c_start" value="${todayISO()}"></div>
       <div class="field"><label>계약 종료일</label><input type="date" id="c_end"></div>
-      <div class="field"><label>연봉 (만원)</label><input type="number" id="c_salary"></div>
+      <div class="field"><label>연봉 (만원) *</label><input type="number" id="c_salary" value="${esc(e && e.currentSalary ? e.currentSalary : "")}"><div class="hint" id="c_salaryHint">${e ? currentSalaryHint(e) : "직원을 먼저 선택하세요."}</div></div>
       <div class="field"><label>사이닝보너스 (만원)</label><input type="number" id="c_signingBonus"></div>
       <div class="field"><label>채용 수수료 (만원)</label><input type="number" id="c_recruitingFee"></div>
       <div class="field"><label>변경 사유</label><select id="c_reason">${["신규","연봉인상","연장","재계약","조정"].map(t=>`<option>${t}</option>`).join("")}</select></div>
@@ -545,6 +556,24 @@ export function openContractModal(e){
     </div>
   `, `<button class="btn" data-cancel>취소</button><button class="btn btn-primary" id="saveContract">등록</button>`);
   byId("overlayRoot").querySelector("[data-cancel]").onclick = closeOverlay;
+
+  // 계약 관리 화면에서 열었을 때 — 직원을 고르면 현재 연봉과 계약 구분을 채운다.
+  // 빈 채로 저장하면 연봉이 0으로 기록되고, 직원 연봉까지 0으로 덮인다.
+  const empSel = byId("c_employee");
+  if(empSel) empSel.onchange = ()=>{
+    const picked = empById(empSel.value);
+    const salaryEl = byId("c_salary");
+    const hintEl = byId("c_salaryHint");
+    if(!picked){
+      salaryEl.value = "";
+      if(hintEl) hintEl.textContent = "직원을 먼저 선택하세요.";
+      return;
+    }
+    salaryEl.value = picked.currentSalary || "";
+    byId("c_type").value = contractTypeFor(picked.employmentType);
+    if(hintEl) hintEl.textContent = currentSalaryHint(picked);
+  };
+
   byId("saveContract").onclick = async ()=>{
     let emp = e;
     if(standalone){
@@ -554,7 +583,10 @@ export function openContractModal(e){
       if(!emp){ toast("직원 정보를 찾을 수 없습니다."); return; }
     }
     const start = byId("c_start").value;
+    if(!start){ toast("계약 시작일을 입력해 주세요."); return; }
     const salary = Number(byId("c_salary").value)||0;
+    // 연봉은 계약에서만 정해진다. 빈 값을 허용하면 직원 연봉이 0으로 덮인다.
+    if(salary <= 0){ toast("연봉을 입력해 주세요. 이 값이 직원의 현재 연봉이 됩니다."); return; }
     await dbAdd("contracts", {
       employeeId:emp.id, employeeName:emp.name, contractType:byId("c_type").value,
       startDate:start, endDate:byId("c_end").value,
@@ -588,6 +620,8 @@ export function openContractRenewalModal(e, oldContract){
     const start = byId("cr_start").value;
     if(!start){ toast("계약 시작일을 입력해 주세요."); return; }
     const salary = Number(byId("cr_salary").value)||0;
+    // 연봉은 계약에서만 정해진다. 빈 값을 허용하면 직원 연봉이 0으로 덮인다.
+    if(salary <= 0){ toast("연봉을 입력해 주세요. 이 값이 직원의 현재 연봉이 됩니다."); return; }
     await dbAdd("contracts", {
       employeeId:e.id, employeeName:e.name, contractType:byId("cr_type").value,
       startDate:start, endDate:byId("cr_end").value,
