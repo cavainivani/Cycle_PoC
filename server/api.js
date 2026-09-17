@@ -88,6 +88,64 @@ function warnUnmapped(path, record) {
   }
 }
 
+/* ---------------------------------------------------------
+   사업부 노출 범위
+   -----------------------------------------------------------
+   화면에도 같은 필터가 있지만(src/data/store.js 의 applyDivisionScope),
+   그건 표시용이다. 화면을 거치지 않고 API 를 직접 불러도 범위를 넘지
+   못하게 하는 것은 여기가 유일하다.
+   --------------------------------------------------------- */
+
+/** 이 요청의 노출 범위 { divisions, visibleIds } — 설정 조회는 한 번만 */
+function scopeOf(req) {
+  return repo.scopeFor(req.session.role);
+}
+
+/**
+ * 기존 레코드를 건드릴 수 있는지 검사한다.
+ * 범위를 벗어나면 응답을 보내고 false 를 돌려준다.
+ *
+ * 없는 레코드와 범위 밖 레코드를 모두 404 로 답한다 — 403 으로 나누면
+ * "그 id 는 존재한다" 는 정보가 새기 때문이다.
+ */
+async function ensureInScope(req, res, path, id) {
+  const { visibleIds } = await scopeOf(req);
+  if (!visibleIds) return true; // 제한 없음
+  const owner = await repo.owningEmployeeId(path, id);
+  if (owner === null) return true; // 직원과 무관한 공용 마스터
+  if (owner === undefined || !visibleIds.has(owner)) {
+    res.status(404).json({ error: "not_found", collection: path, id });
+    return false;
+  }
+  return true;
+}
+
+/** 새로 만드는 레코드가 범위 안인지 검사한다. */
+async function ensureNewInScope(req, res, path, record) {
+  const { divisions, visibleIds } = await scopeOf(req);
+  if (!visibleIds) return true;
+  const kind = repo.ownershipKind(path);
+  if (kind === null) return true;
+
+  if (kind === "employee") {
+    const employeeId = record && record.employeeId;
+    if (!employeeId || !visibleIds.has(employeeId)) {
+      res.status(403).json({ error: "out_of_scope", message: "노출 범위를 벗어난 직원입니다." });
+      return false;
+    }
+    return true;
+  }
+
+  // employees 신규 등록 — 아직 id 가 없으므로 사업부로 판단한다.
+  // 자기 범위 밖 사업부로 직원을 만들어 두는 것을 막는다.
+  const division = (record && record.division) || "미지정";
+  if (!divisions.includes(division)) {
+    res.status(403).json({ error: "out_of_scope", message: "노출 범위를 벗어난 사업부입니다." });
+    return false;
+  }
+  return true;
+}
+
 export function createApiRouter() {
   const api = express.Router();
 
@@ -190,7 +248,8 @@ export function createApiRouter() {
   api.get(
     "/collections",
     wrap(async (req, res) => {
-      res.json(await repo.loadAll());
+      const { visibleIds } = await scopeOf(req);
+      res.json(await repo.loadAll(visibleIds));
     })
   );
 
@@ -202,6 +261,7 @@ export function createApiRouter() {
       if (!path) return;
       const body = requireObjectBody(req, res);
       if (!body) return;
+      if (!(await ensureNewInScope(req, res, path, body))) return;
       warnUnmapped(path, body);
       const id = await repo.insert(path, body);
       res.status(201).json({ id });
@@ -215,6 +275,7 @@ export function createApiRouter() {
     if (!path) return;
     const body = requireObjectBody(req, res);
     if (!body) return;
+    if (!(await ensureInScope(req, res, path, req.params.id))) return;
     warnUnmapped(path, body);
     const ok = await repo.replace(path, req.params.id, body);
     if (!ok) {
@@ -232,6 +293,7 @@ export function createApiRouter() {
     wrap(async (req, res) => {
       const path = resolveCollection(req, res);
       if (!path) return;
+      if (!(await ensureInScope(req, res, path, req.params.id))) return;
       const ok = await repo.remove(path, req.params.id);
       if (!ok) {
         res.status(404).json({ error: "not_found", collection: path, id: req.params.id });

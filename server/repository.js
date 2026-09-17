@@ -86,16 +86,95 @@ async function loadCollection(pool, path) {
   return records;
 }
 
-/** GET /api/collections — 전체 스냅샷 */
-export async function loadAll() {
+/**
+ * 컬렉션이 직원에 매여 있는 방식.
+ *   "self"     employees — 레코드 자신의 id 가 곧 직원 id
+ *   "employee" employeeId 컬럼으로 직원을 가리킨다
+ *   null       직원과 무관한 공용 마스터 (projects, subsidy_programs)
+ */
+export function ownershipKind(path) {
+  if (path === "employees") return "self";
+  return COLLECTIONS[path].columns.employeeId ? "employee" : null;
+}
+
+/**
+ * GET /api/collections — 전체 스냅샷
+ *
+ * visibleIds 가 Set 이면 그 직원들만 보인다. null 이면 제한 없음.
+ * 규칙은 화면의 applyDivisionScope()(src/data/store.js)와 같아야 한다 —
+ * 다만 이제 서버가 거르므로, 화면을 우회해 API 를 직접 불러도 범위를
+ * 넘은 데이터는 나오지 않는다.
+ */
+export async function loadAll(visibleIds = null) {
   return withRetry(async () => {
     const pool = await getPool();
     const out = {};
     for (const path of Object.keys(COLLECTIONS)) {
-      out[path] = await loadCollection(pool, path);
+      const records = await loadCollection(pool, path);
+      if (!visibleIds) {
+        out[path] = records;
+        continue;
+      }
+      const kind = ownershipKind(path);
+      if (kind === "self") out[path] = records.filter((r) => visibleIds.has(r.id));
+      else if (kind === "employee") out[path] = records.filter((r) => visibleIds.has(r.employeeId));
+      else out[path] = records; // 공용 마스터는 그대로
     }
     return out;
   }, "loadAll");
+}
+
+/**
+ * 역할의 노출 범위. 한 번의 설정 조회로 둘 다 돌려준다.
+ *   divisions   허용 사업부 목록 (빈 배열 = 제한 없음)
+ *   visibleIds  허용 직원 id 집합 (null = 제한 없음)
+ *
+ * 화면과 같은 규칙: 사업부가 비어 있으면 "미지정" 으로 친다.
+ */
+export async function scopeFor(role) {
+  const settings = await readSettings();
+  const configured = settings && settings.visibleDivisions ? settings.visibleDivisions[role] : null;
+  const divisions = Array.isArray(configured) ? configured.filter((d) => typeof d === "string") : [];
+  if (divisions.length === 0) return { divisions: [], visibleIds: null }; // 제한 없음
+
+  const visibleIds = await idsInDivisions(divisions);
+  return { divisions, visibleIds };
+}
+
+async function idsInDivisions(divisions) {
+  return withRetry(async () => {
+    const pool = await getPool();
+    const req = pool.request();
+    const params = divisions.map((d, i) => {
+      req.input(`d${i}`, sql.NVarChar(50), d);
+      return `@d${i}`;
+    });
+    const rows = (
+      await req.query(
+        `SELECT id FROM dbo.employees
+          WHERE ISNULL(NULLIF(division, N''), N'미지정') IN (${params.join(", ")})`
+      )
+    ).recordset;
+    return new Set(rows.map((r) => r.id));
+  }, "idsInDivisions");
+}
+
+/**
+ * 레코드가 매여 있는 직원 id. 레코드가 없으면 undefined,
+ * 직원과 무관한 컬렉션이면 null.
+ */
+export async function owningEmployeeId(path, id) {
+  const kind = ownershipKind(path);
+  if (kind === null) return null;
+  const def = COLLECTIONS[path];
+  const col = kind === "self" ? "id" : "employee_id";
+  return withRetry(async () => {
+    const pool = await getPool();
+    const req = pool.request();
+    req.input("id", sql.NVarChar(50), id);
+    const rows = (await req.query(`SELECT ${col} AS owner FROM dbo.${def.table} WHERE id = @id`)).recordset;
+    return rows.length ? rows[0].owner : undefined;
+  }, `owningEmployeeId ${path}`);
 }
 
 /* ---------------------------------------------------------
@@ -118,9 +197,20 @@ function addParams(request, def, record, prefix = "p") {
     const name = `${prefix}${i++}`;
     const { sqlType, value } = toParam(colDef.type, getPath(record, field));
     request.input(name, sqlType, value);
-    assignments.push({ col: colDef.col, param: name, value });
+    assignments.push({ col: colDef.col, param: name, value, immutable: !!colDef.immutable });
   }
   return assignments;
+}
+
+/**
+ * UPDATE 에서 빼야 할 컬럼을 걸러낸다.
+ * ---------------------------------------------------------
+ * created_at 은 생성 시각이라 수정 대상이 아니다. 게다가 NOT NULL 이라,
+ * 화면이 createdAt 없이 보낸 레코드를 그대로 UPDATE 하면 NULL 이 써져
+ * 제약 위반이 난다. 아예 SET 목록에서 뺀다.
+ */
+function updatable(assignments) {
+  return assignments.filter((a) => !a.immutable);
 }
 
 /**
@@ -213,7 +303,7 @@ export async function replace(path, id, record) {
     try {
       const req = new sql.Request(tx);
       req.input("id", sql.NVarChar(50), id);
-      const assignments = addParams(req, def, record);
+      const assignments = updatable(addParams(req, def, record));
       const setClause = assignments.map((a) => `${a.col} = @${a.param}`).join(", ");
       const result = await req.query(
         `UPDATE dbo.${def.table} SET ${setClause}, updated_at = SYSUTCDATETIME() WHERE id = @id`

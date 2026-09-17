@@ -23,6 +23,11 @@
      bit      BIT           truthy -> 1
      json     NVARCHAR(MAX) JSON.stringify / JSON.parse
      datetime DATETIME2     ISO 문자열 <-> Date
+
+   immutable: true
+     INSERT 에만 쓰이고 UPDATE 의 SET 목록에서는 빠진다. created_at 이
+     그렇다 — 생성 시각이라 수정 대상이 아니고, NOT NULL 이라 화면이
+     createdAt 없이 보낸 레코드를 그대로 UPDATE 하면 제약 위반이 난다.
    ========================================================= */
 
 /**
@@ -64,7 +69,7 @@ export const COLLECTIONS = {
       resume:                     { col: "resume_json",                   type: "json" },
       currentTasks:               { col: "current_tasks_json",            type: "json" },
       isSample:                   { col: "is_sample",                     type: "bit" },
-      createdAt:                  { col: "created_at",                    type: "datetime" },
+      createdAt:                  { col: "created_at",                    type: "datetime", immutable: true },
     },
     children: {
       // employees.probation.evaluations[] -> probation_evaluations
@@ -100,7 +105,7 @@ export const COLLECTIONS = {
       status:        { col: "status",         type: "text" },
       renewalStatus: { col: "renewal_status", type: "text" },
       isSample:      { col: "is_sample",      type: "bit" },
-      createdAt:     { col: "created_at",     type: "datetime" },
+      createdAt:     { col: "created_at",     type: "datetime", immutable: true },
     },
   },
 
@@ -119,7 +124,7 @@ export const COLLECTIONS = {
       strengths:    { col: "strengths",     type: "text" },
       improvements: { col: "improvements",  type: "text" },
       isSample:     { col: "is_sample",     type: "bit" },
-      createdAt:    { col: "created_at",    type: "datetime" },
+      createdAt:    { col: "created_at",    type: "datetime", immutable: true },
     },
   },
 
@@ -137,7 +142,7 @@ export const COLLECTIONS = {
       comment:          { col: "comment",           type: "text" },
       promotionOpinion: { col: "promotion_opinion", type: "text" },
       isSample:         { col: "is_sample",         type: "bit" },
-      createdAt:        { col: "created_at",        type: "datetime" },
+      createdAt:        { col: "created_at",        type: "datetime", immutable: true },
     },
   },
 
@@ -153,7 +158,7 @@ export const COLLECTIONS = {
       items:        { col: "items_json",    type: "json" },
       comment:      { col: "comment",       type: "text" },
       isSample:     { col: "is_sample",     type: "bit" },
-      createdAt:    { col: "created_at",    type: "datetime" },
+      createdAt:    { col: "created_at",    type: "datetime", immutable: true },
     },
   },
 
@@ -165,7 +170,7 @@ export const COLLECTIONS = {
       months:    { col: "support_months", type: "int" },
       notes:     { col: "notes",          type: "text" },
       isSample:  { col: "is_sample",      type: "bit" },
-      createdAt: { col: "created_at",     type: "datetime" },
+      createdAt: { col: "created_at",     type: "datetime", immutable: true },
     },
   },
 
@@ -185,7 +190,7 @@ export const COLLECTIONS = {
       totalAmount:   { col: "total_amount",   type: "decimal" },
       notes:         { col: "notes",          type: "text" },
       isSample:      { col: "is_sample",      type: "bit" },
-      createdAt:     { col: "created_at",     type: "datetime" },
+      createdAt:     { col: "created_at",     type: "datetime", immutable: true },
     },
     children: {
       months: {
@@ -206,7 +211,7 @@ export const COLLECTIONS = {
     columns: {
       name:      { col: "name",       type: "text" },
       isSample:  { col: "is_sample",  type: "bit" },
-      createdAt: { col: "created_at", type: "datetime" },
+      createdAt: { col: "created_at", type: "datetime", immutable: true },
     },
   },
 };
