@@ -16,6 +16,8 @@ import { buildSeedData } from "../seed.js";
 
 const STORAGE_KEY = "mcb-hr-ops/v1";
 const SETTINGS_KEY = "mcb-hr-ops/settings/v1";
+/** 초안 모드의 초기 암호. src/state/settings.js 의 기본값과 같다. */
+const DEFAULT_LOCAL_PASSWORD = "0000000000";
 
 function safeRead(key) {
   try {
@@ -41,6 +43,8 @@ export function createLocalAdapter() {
   COLLECTION_PATHS.forEach((p) => { tables[p] = new Map(); });
   let seq = 1;
   let settingsDoc = null;
+  /** 로그인한 역할 (메모리에만 — 새로고침하면 풀린다) */
+  let localRole = null;
 
   function persist() {
     const dump = {};
@@ -113,6 +117,33 @@ export function createLocalAdapter() {
     async writeSettings(doc) {
       settingsDoc = doc;
       safeWrite(SETTINGS_KEY, doc);
+    },
+
+    /* ---------- 인증 ----------
+       DB 도 서버도 없는 모드라, 예전처럼 브라우저 안에서 비교한다.
+       이건 보안 장치가 아니라 초안을 클릭해 보기 위한 화면 잠금이다.
+       실제 인증은 rest 어댑터(서버 검사 + 세션 쿠키)에만 있다. */
+
+    async login(role, password) {
+      const key = role === "admin" ? "adminPassword" : "pmoPassword";
+      const expected = (settingsDoc && settingsDoc[key]) || DEFAULT_LOCAL_PASSWORD;
+      if (password && password === expected) {
+        localRole = role;
+        return role;
+      }
+      return null;
+    },
+    async logout() {
+      localRole = null;
+    },
+    async session() {
+      // 새로고침하면 메모리가 비므로 항상 로그아웃 상태다 (기존 동작과 같다).
+      return localRole;
+    },
+    async setPassword(role, newPassword) {
+      const key = role === "admin" ? "adminPassword" : "pmoPassword";
+      settingsDoc = { ...(settingsDoc || {}), [key]: newPassword };
+      safeWrite(SETTINGS_KEY, settingsDoc);
     },
 
     /** 저장된 내용을 전부 지우고 예시 데이터로 되돌린다. */

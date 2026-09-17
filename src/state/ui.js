@@ -11,6 +11,8 @@ export const ui = {
   loginRole: "admin",
   /** 로그인 실패 메시지 */
   loginError: "",
+  /** 로그인 요청이 서버에 가 있는 동안 true (중복 제출 방지) */
+  loginBusy: false,
 
   /** 인력 마스터에서 열려 있는 직원 상세 서랍의 id (null = 닫힘) */
   drawerEmpId: null,

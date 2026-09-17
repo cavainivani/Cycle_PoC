@@ -255,9 +255,18 @@ export const KEY_PATH = Object.fromEntries(
 export const SETTINGS_DOC = {
   path: "app_settings/system",
   fields: {
-    adminPassword:    { type: "text",   label: "관리자 암호" },
-    pmoPassword:      { type: "text",   label: "PMO 암호" },
     visibleDivisions: { type: "object", label: "역할별 노출 사업부", note: "{admin:string[], pmo:string[]} — 빈 배열이면 전체 공개" },
     alertDays:        { type: "object", label: "알림 기준일",       note: "{probation:number, contract:number}" },
   },
+  /**
+   * 암호는 이 문서에 없다.
+   *
+   * rest 모드에서는 app_settings 테이블의 admin_password / pmo_password 에
+   * scrypt 해시로 저장되고, 서버 밖으로 나오지 않는다. 검사는 서버가 하고
+   * (POST /api/login), 변경도 별도 경로(POST /api/password)를 쓴다.
+   * 브라우저는 암호를 가지지 않는다.
+   *
+   * local 모드(DB 없는 초안)만 예외로 localStorage 에 평문을 두고 화면에서
+   * 비교한다 — 보안 장치가 아니라 클릭해 보기 위한 잠금이다.
+   */
 };

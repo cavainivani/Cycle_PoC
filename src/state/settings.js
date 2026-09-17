@@ -7,12 +7,15 @@
    bindings themselves are read-only for importers.
    ========================================================= */
 
-export const DEFAULT_SYSTEM_PASSWORD = "0000000000";
 export const DEFAULT_ALERT_DAYS = { probation: 30, contract: 30 };
 
+/**
+ * ★ 암호는 여기에 두지 않는다.
+ *   예전에는 settings.passwords 에 평문 암호를 담아 두고 브라우저에서
+ *   비교했다. 지금은 서버가 검사하므로(adapter.login) 브라우저가 암호를
+ *   가질 이유가 없다. 다시 추가하지 말 것.
+ */
 export const settings = {
-  /** 로그인 암호 (역할별). 프로토타입 단계의 단순 비교용 — 실제 인증으로 교체 대상. */
-  passwords: { admin: DEFAULT_SYSTEM_PASSWORD, pmo: DEFAULT_SYSTEM_PASSWORD },
   /** 역할별 노출 사업부. 빈 배열 = 전체 공개, 값이 있으면 그 사업부만 보임. */
   visibleDivisions: { admin: [], pmo: [] },
   /** 알림 기준일(전역). 수습 평가 / 계약 갱신 대상자 집계에 쓰임. */

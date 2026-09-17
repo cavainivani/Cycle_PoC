@@ -17,7 +17,7 @@
      배열 인덱스로 지운다. ord 컬럼이 그 순서를 보존한다.
    ========================================================= */
 
-import { COLLECTIONS, SETTINGS, getPath, setPath, ensureNestedRoots } from "./collections.js";
+import { COLLECTIONS, SETTINGS, PASSWORD_COLUMNS, getPath, setPath, ensureNestedRoots } from "./collections.js";
 import { getPool, withRetry, toParam, fromColumn, newId, sql } from "./db.js";
 
 /** 읽을 때 row 에서 꺼낼 실제 속성 이름 ([role] -> role) */
@@ -288,4 +288,44 @@ export async function writeSettings(doc) {
             VALUES (1, ${params.map((p) => "@" + p).join(", ")}, SYSUTCDATETIME());`
     );
   }, "writeSettings");
+}
+
+/* ---------------------------------------------------------
+   암호 해시 — 설정 문서와 분리해서 다룬다
+   ---------------------------------------------------------
+   같은 app_settings 행에 들어 있지만, readSettings/writeSettings 의
+   매핑에서는 일부러 빠져 있다. 암호가 GET /api/settings 응답에
+   섞여 나가는 일이 없도록 경로 자체를 나눈 것이다.
+   --------------------------------------------------------- */
+
+function passwordColumn(role) {
+  const col = PASSWORD_COLUMNS[role];
+  if (!col) throw new Error(`알 수 없는 역할: ${role}`);
+  return col;
+}
+
+/** 저장된 해시. 한 번도 설정한 적이 없으면 null (기본 암호를 쓴다는 뜻) */
+export async function readPasswordHash(role) {
+  const col = passwordColumn(role);
+  return withRetry(async () => {
+    const pool = await getPool();
+    const rows = (await pool.request().query(`SELECT ${col} AS hash FROM dbo.${SETTINGS.table} WHERE id = 1`)).recordset;
+    return rows.length && rows[0].hash ? String(rows[0].hash) : null;
+  }, `readPasswordHash ${role}`);
+}
+
+/** 해시를 저장한다. 설정 행이 없으면 만든다. */
+export async function writePasswordHash(role, hash) {
+  const col = passwordColumn(role);
+  return withRetry(async () => {
+    const pool = await getPool();
+    const req = pool.request();
+    req.input("hash", sql.NVarChar(200), hash);
+    await req.query(
+      `MERGE dbo.${SETTINGS.table} AS target
+       USING (SELECT 1 AS id) AS src ON target.id = src.id
+       WHEN MATCHED THEN UPDATE SET ${col} = @hash, updated_at = SYSUTCDATETIME()
+       WHEN NOT MATCHED THEN INSERT (id, ${col}, updated_at) VALUES (1, @hash, SYSUTCDATETIME());`
+    );
+  }, `writePasswordHash ${role}`);
 }

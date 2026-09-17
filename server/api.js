@@ -24,8 +24,32 @@ import express from "express";
 import { COLLECTIONS } from "./collections.js";
 import * as repo from "./repository.js";
 import { getPool, withRetry } from "./db.js";
+import {
+  DEFAULT_SYSTEM_PASSWORD,
+  hashPassword,
+  verifyPassword,
+  safeEqualString,
+  setSessionCookie,
+  clearSessionCookie,
+  sessionOf,
+  requireAuth,
+  requireAdmin,
+} from "./auth.js";
 
 const isDev = process.env.NODE_ENV !== "production";
+
+const ROLES = ["admin", "pmo"];
+
+/**
+ * 역할의 암호를 검사한다.
+ * 저장된 해시가 없으면 초기 암호(0000000000)와 비교한다 — 설정을
+ * 한 번도 저장하지 않은 상태에서도 로그인할 수 있어야 하기 때문이다.
+ */
+async function checkPassword(role, plain) {
+  const stored = await repo.readPasswordHash(role);
+  if (stored) return verifyPassword(plain, stored);
+  return safeEqualString(plain, DEFAULT_SYSTEM_PASSWORD);
+}
 
 /** async 핸들러의 예외를 express 에러 미들웨어로 넘긴다. */
 function wrap(handler) {
@@ -80,7 +104,45 @@ export function createApiRouter() {
     })
   );
 
+  /* ---------- 로그인 / 로그아웃 (인증 불필요) ---------- */
+
+  api.post(
+    "/login",
+    wrap(async (req, res) => {
+      const body = requireObjectBody(req, res);
+      if (!body) return;
+      const role = String(body.role || "");
+      const password = String(body.password || "");
+      if (!ROLES.includes(role)) {
+        res.status(400).json({ error: "invalid_role" });
+        return;
+      }
+      if (!(await checkPassword(role, password))) {
+        // 어떤 역할이 틀렸는지 등 힌트를 주지 않는다.
+        res.status(401).json({ error: "invalid_credentials", message: "암호가 올바르지 않습니다." });
+        return;
+      }
+      setSessionCookie(res, role);
+      res.json({ role });
+    })
+  );
+
+  api.post("/logout", (req, res) => {
+    clearSessionCookie(res);
+    res.status(204).end();
+  });
+
+  /** 새로고침 후 로그인 상태를 복원할 때 쓴다. */
+  api.get("/session", (req, res) => {
+    const session = sessionOf(req);
+    res.json(session ? { role: session.role } : null);
+  });
+
+  /* ---------- 여기서부터 로그인 필수 ---------- */
+  api.use(requireAuth);
+
   /* ---------- 설정 (단일 문서) ---------- */
+  // 응답에 암호는 포함되지 않는다 (collections.js 의 SETTINGS 주석 참고).
   api.get(
     "/settings",
     wrap(async (req, res) => {
@@ -88,12 +150,38 @@ export function createApiRouter() {
     })
   );
 
+  // 설정 변경은 관리자 전용 화면이다.
   api.put(
     "/settings",
+    requireAdmin,
     wrap(async (req, res) => {
       const body = requireObjectBody(req, res);
       if (!body) return;
       await repo.writeSettings(body);
+      res.status(204).end();
+    })
+  );
+
+  /* ---------- 암호 변경 (관리자 전용) ---------- */
+  // 설정 문서와 경로를 나눈 이유: 설정 저장은 "문서 통째로 쓰기"라,
+  // 조회 응답에서 암호를 빼고 나면 저장할 때 빈 값으로 덮여 날아간다.
+  api.post(
+    "/password",
+    requireAdmin,
+    wrap(async (req, res) => {
+      const body = requireObjectBody(req, res);
+      if (!body) return;
+      const role = String(body.role || "");
+      const newPassword = String(body.newPassword || "");
+      if (!ROLES.includes(role)) {
+        res.status(400).json({ error: "invalid_role" });
+        return;
+      }
+      if (newPassword.length < 4) {
+        res.status(400).json({ error: "weak_password", message: "암호는 4자 이상이어야 합니다." });
+        return;
+      }
+      await repo.writePasswordHash(role, await hashPassword(newPassword));
       res.status(204).end();
     })
   );

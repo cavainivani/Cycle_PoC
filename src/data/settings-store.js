@@ -5,13 +5,20 @@
    단일 설정 문서(schema.js 의 SETTINGS_DOC)에 저장한다.
    ========================================================= */
 
-import { settings, DEFAULT_SYSTEM_PASSWORD, DEFAULT_ALERT_DAYS } from "../state/settings.js";
+import { settings, DEFAULT_ALERT_DAYS } from "../state/settings.js";
 import { adapter, applyDivisionScope } from "./store.js";
 import { toast } from "../ui/overlay.js";
 import { requestRender } from "../core/bus.js";
 import { renderAuthGate } from "../views/auth.js";
 
-/** 저장소에서 설정을 읽어 settings 객체에 반영한다. 앱 시작 시 한 번 호출. */
+/**
+ * 저장소에서 설정을 읽어 settings 객체에 반영한다. 로그인 직후 호출된다.
+ *
+ * ★ 암호는 여기로 오지 않는다.
+ *   서버의 GET /api/settings 응답에 암호가 들어 있지 않고, 들어 있어서도
+ *   안 된다. 암호 검사는 서버가 하고(adapter.login), 브라우저는 정답을
+ *   알 필요가 없다.
+ */
 export async function loadSystemSettings(){
   let d = null;
   try{
@@ -20,9 +27,6 @@ export async function loadSystemSettings(){
     d = null;
   }
   if(d){
-    const legacy = d.password; // backward-compat: single shared password from before admin/pmo were split
-    settings.passwords.admin = d.adminPassword || legacy || DEFAULT_SYSTEM_PASSWORD;
-    settings.passwords.pmo = d.pmoPassword || legacy || DEFAULT_SYSTEM_PASSWORD;
     if(Array.isArray(d.visibleDivisions)){
       // backward-compat: earlier version stored one shared array for both roles
       settings.visibleDivisions = { admin: d.visibleDivisions, pmo: d.visibleDivisions };
@@ -49,11 +53,12 @@ export async function loadSystemSettings(){
   requestRender();
 }
 
+// 암호는 이 문서에 넣지 않는다 — 별도 경로(adapter.setPassword)로만 바꾼다.
+// 여기에 암호를 실으면, 조회 응답에 암호가 없는 지금 구조에서는 빈 값으로
+// 덮여 날아간다.
 async function writeAppSettingsDoc(){
   try{
     await adapter.writeSettings({
-      adminPassword: settings.passwords.admin,
-      pmoPassword: settings.passwords.pmo,
       visibleDivisions: settings.visibleDivisions,
       alertDays: settings.alertDays,
     });
@@ -65,9 +70,12 @@ async function writeAppSettingsDoc(){
 }
 
 export async function setSystemPassword(role, newPw){
-  settings.passwords[role] = newPw;
-  const ok = await writeAppSettingsDoc();
-  if(!ok) return;
+  try{
+    await adapter.setPassword(role, newPw);
+  }catch(err){
+    toast("암호 변경에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    return;
+  }
   toast((role==="admin"?"관리자":"PMO")+" 암호가 변경되었습니다.");
 }
 

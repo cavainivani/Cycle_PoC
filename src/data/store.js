@@ -73,17 +73,46 @@ export async function reloadAll(){
     });
     storeStatus.error = null;
   }catch(err){
+    if(isUnauthorized(err)){
+      if(onUnauthorized) onUnauthorized();
+      return;
+    }
     storeStatus.error = err && err.message ? err.message : String(err);
   }
   applyDivisionScope();
 }
 
-/** 저장소를 준비한다. 앱 시작 시 한 번만 호출. */
+/**
+ * 저장소를 준비한다. 앱 시작 시 한 번만 호출.
+ *
+ * ★ 여기서 데이터를 읽지 않는다.
+ *   rest 모드에서는 로그인 전 /api 요청이 전부 401 이라, 기동하자마자
+ *   읽으면 로그인 화면에 엉뚱한 오류 배너가 뜬다. 실제 조회는 로그인
+ *   직후 onLoggedIn() 에서 한다.
+ */
 export async function initStore(){
   adapter = SOURCE === "rest" ? createRestAdapter() : createLocalAdapter();
   storeStatus.source = adapter.name;
   storeStatus.origin = adapter.origin;
-  await reloadAll();
+}
+
+/** 로그아웃 시 메모리에 남은 데이터를 비운다. */
+export function clearLoadedData(){
+  COLLECTION_PATHS.forEach(path=>{ rawState[PATH_KEY[path]] = []; });
+  storeStatus.error = null;
+  applyDivisionScope();
+}
+
+/**
+ * 세션이 끊겼을 때(401) 호출할 핸들러. app.js 가 등록한다.
+ * store.js 가 views/auth.js 를 직접 import 하면 순환 참조가 되므로
+ * 이렇게 주입받는다.
+ */
+let onUnauthorized = null;
+export function setUnauthorizedHandler(fn){ onUnauthorized = fn; }
+
+function isUnauthorized(err){
+  return !!err && (err.name === "UnauthorizedError" || /401/.test(String(err.message||"")));
 }
 
 function recordById(path, id){
@@ -97,6 +126,10 @@ async function mutate(fn){
     requestRender();
     return result;
   }catch(err){
+    if(isUnauthorized(err)){
+      if(onUnauthorized) onUnauthorized();
+      return null;
+    }
     storeStatus.error = err && err.message ? err.message : String(err);
     toast("저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     requestRender();

@@ -42,11 +42,26 @@ const page = await browser.newPage();
 page.on("console", (m) => { if (m.type() === "error") errors.push("[console] " + m.text()); });
 page.on("pageerror", (e) => errors.push("[pageerror] " + (e && e.message)));
 
+/** 앱 셸이 보이면 = 이미 로그인된 상태 */
+function shellVisible() {
+  return page.evaluate(() => {
+    const shell = document.querySelector(".app-shell");
+    return !!shell && shell.style.display !== "none";
+  });
+}
+
 async function login() {
+  // 로그인 화면이 준비되거나, 이미 로그인된 상태가 되거나 — 둘 중 하나를 기다린다.
   await page.waitForFunction(() => {
     const b = document.querySelector("#loginSubmitBtn");
-    return b && !b.disabled;
+    const shell = document.querySelector(".app-shell");
+    return (b && !b.disabled) || (shell && shell.style.display !== "none");
   }, { timeout: 15000 });
+
+  // rest 모드에서는 세션 쿠키가 살아 있으면 새로고침해도 로그인 화면이 뜨지 않는다.
+  // (local 모드는 메모리 세션이라 매번 다시 로그인한다.)
+  if (await shellVisible()) return;
+
   await page.fill("#loginPassword", PASSWORD);
   await page.click("#loginSubmitBtn");
   await page.waitForSelector(".app-shell .nav-item", { timeout: 15000 });

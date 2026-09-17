@@ -214,15 +214,27 @@ export const COLLECTIONS = {
 /** /api/:collection 으로 허용되는 경로 목록 */
 export const COLLECTION_PATHS = Object.keys(COLLECTIONS);
 
-/** 앱 설정 단일 행 매핑 (schema.js 의 SETTINGS_DOC) */
+/**
+ * 앱 설정 단일 행 매핑 (schema.js 의 SETTINGS_DOC)
+ *
+ * ★ 암호 컬럼(admin_password / pmo_password)은 여기에 없다.
+ *   이 매핑은 GET /api/settings 응답을 그대로 만들어내므로, 넣으면
+ *   암호 해시가 브라우저로 나간다. 암호는 server/repository.js 의
+ *   readPasswordHash / writePasswordHash 로만 다루고, 응답에는
+ *   절대 싣지 않는다. 컬럼을 추가하지 말 것.
+ */
 export const SETTINGS = {
   table: "app_settings",
   columns: {
-    adminPassword:    { col: "admin_password",         type: "text" },
-    pmoPassword:      { col: "pmo_password",           type: "text" },
     visibleDivisions: { col: "visible_divisions_json", type: "json" },
     alertDays:        { col: "alert_days_json",        type: "json" },
   },
+};
+
+/** 역할 -> 암호 해시 컬럼 */
+export const PASSWORD_COLUMNS = {
+  admin: "admin_password",
+  pmo: "pmo_password",
 };
 
 /* ---------------------------------------------------------
