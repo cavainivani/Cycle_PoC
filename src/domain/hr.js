@@ -1,7 +1,7 @@
 import { SUBSIDY_APP_STATUS_TO_EMP_FIELD, SUBSIDY_EMP_STATUS_RANK } from "../config/options.js";
 import { daysUntil, esc } from "../core/format.js";
 import { dbUpdate, rawState, state } from "../data/store.js";
-import { latestContractOf, renewalDateOf } from "./employee-helpers.js";
+import { latestContractOf, pickLatestContract, renewalDateOf } from "./employee-helpers.js";
 import { settings } from "../state/settings.js";
 export function empById(id){ return state.employees.find(e=>e.id===id); }
 export function empLabel(e){ return e ? `${e.name} · ${e.division||"사업부 미정"}` : "—"; }
@@ -38,8 +38,8 @@ export function contractRenewalDueList(){
 export async function syncEmployeeContractFields(employeeId){
   const emp = (rawState.employees||[]).find(e=>e.id===employeeId);
   if(!emp) return;
-  const latest = [...(rawState.contracts||[]).filter(c=>c.employeeId===employeeId)]
-    .sort((a,b)=>(b.startDate||"").localeCompare(a.startDate||""))[0];
+  // 화면(state)이 아니라 rawState 를 본다 — 사업부 제한이 걸려 있어도 정확해야 한다.
+  const latest = pickLatestContract((rawState.contracts||[]).filter(c=>c.employeeId===employeeId));
   const next = {
     lastContractDate: latest ? (latest.startDate||"") : "",
     currentSalary: latest ? (Number(latest.annualSalary)||0) : 0,

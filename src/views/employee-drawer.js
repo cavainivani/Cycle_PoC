@@ -537,13 +537,25 @@ function currentSalaryHint(emp){
 
 export function openContractModal(e){
   const standalone = !e;
-  const empOptions = standalone ? [...state.employees].sort((a,b)=>(a.name||"").localeCompare(b.name||"","ko")).map(emp=>`<option value="${esc(emp.id)}">${esc(emp.name)} · ${esc(emp.division||"사업부 미정")}</option>`).join("") : "";
+  const sortedEmps = standalone ? [...state.employees].sort((a,b)=>(a.name||"").localeCompare(b.name||"","ko")) : [];
+  // 사업부 목록은 실제로 등록된 값에서 뽑는다 (상수 목록에 없는 값도 잡히게)
+  const empDivisions = [...new Set(sortedEmps.map(x=> x.division || "사업부 미정"))].sort((a,b)=>a.localeCompare(b,"ko"));
   const typeOptions = (sel)=> ["정규직 근로계약","연봉계약","수습계약","계약직 근로계약","프리랜서 계약"]
     .map(t=>`<option ${sel===t?"selected":""}>${t}</option>`).join("");
 
   openModal("계약 등록", `
     <div class="form-grid">
-      ${standalone ? `<div class="field span2"><label>직원 *</label><select id="c_employee"><option value="">직원 마스터에서 선택</option>${empOptions}</select><div class="hint" id="c_empHint">직원을 선택하면 현재 연봉과 계약 구분이 채워집니다.</div></div>` : ""}
+      ${standalone ? `
+      <!-- 인원이 많아지면 드롭다운 하나로는 못 찾는다. 사업부와 이름으로 먼저 좁힌다. -->
+      <div class="field"><label>사업부</label>
+        <select id="c_empDivision"><option value="">전체 사업부</option>${empDivisions.map(d=>`<option>${esc(d)}</option>`).join("")}</select>
+      </div>
+      <div class="field"><label>이름 검색</label>
+        <input id="c_empSearch" placeholder="이름 또는 사번" autocomplete="off">
+      </div>
+      <div class="field span2"><label>직원 *</label><select id="c_employee"></select>
+        <div class="hint" id="c_empHint">직원을 선택하면 현재 연봉과 계약 구분이 채워집니다.</div>
+      </div>` : ""}
       <div class="field span2"><label>계약 구분</label><select id="c_type">${typeOptions(e ? contractTypeFor(e.employmentType) : null)}</select></div>
       <div class="field"><label>계약 시작일</label><input type="date" id="c_start" value="${todayISO()}"></div>
       <div class="field"><label>계약 종료일</label><input type="date" id="c_end"></div>
@@ -560,7 +572,7 @@ export function openContractModal(e){
   // 계약 관리 화면에서 열었을 때 — 직원을 고르면 현재 연봉과 계약 구분을 채운다.
   // 빈 채로 저장하면 연봉이 0으로 기록되고, 직원 연봉까지 0으로 덮인다.
   const empSel = byId("c_employee");
-  if(empSel) empSel.onchange = ()=>{
+  const applyPicked = ()=>{
     const picked = empById(empSel.value);
     const salaryEl = byId("c_salary");
     const hintEl = byId("c_salaryHint");
@@ -573,6 +585,34 @@ export function openContractModal(e){
     byId("c_type").value = contractTypeFor(picked.employmentType);
     if(hintEl) hintEl.textContent = currentSalaryHint(picked);
   };
+
+  if(empSel){
+    const divSel = byId("c_empDivision");
+    const searchEl = byId("c_empSearch");
+    const hintEl = byId("c_empHint");
+
+    const refreshEmpOptions = ()=>{
+      const div = divSel ? divSel.value : "";
+      const q = (searchEl ? searchEl.value : "").trim().toLowerCase();
+      const list = sortedEmps.filter(x=>{
+        if(div && (x.division || "사업부 미정") !== div) return false;
+        if(!q) return true;
+        return (x.name||"").toLowerCase().includes(q) || (x.empNo||"").toLowerCase().includes(q);
+      });
+      const keep = empSel.value;
+      empSel.innerHTML = `<option value="">${list.length ? "직원 선택" : "조건에 맞는 직원이 없습니다"}</option>`
+        + list.map(x=>`<option value="${esc(x.id)}">${esc(x.name)} · ${esc(x.division||"사업부 미정")}${x.empNo?` · ${esc(x.empNo)}`:""}</option>`).join("");
+      // 좁히기 전에 고른 직원이 아직 목록에 있으면 선택을 유지한다.
+      if(keep && list.some(x=>x.id===keep)) empSel.value = keep;
+      if(hintEl) hintEl.textContent = `${list.length}명 중에서 선택 · 직원을 선택하면 현재 연봉과 계약 구분이 채워집니다.`;
+      if(empSel.value !== keep) applyPicked();
+    };
+
+    if(divSel) divSel.onchange = refreshEmpOptions;
+    if(searchEl) searchEl.oninput = refreshEmpOptions;
+    empSel.onchange = applyPicked;
+    refreshEmpOptions();
+  }
 
   byId("saveContract").onclick = async ()=>{
     let emp = e;
