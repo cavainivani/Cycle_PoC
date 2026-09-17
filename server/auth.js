@@ -184,6 +184,36 @@ export function requireAuth(req, res, next) {
   next();
 }
 
+/* ---------------------------------------------------------
+   역할별 쓰기 권한
+   -----------------------------------------------------------
+   PMO 가 도달할 수 있는 화면은 대시보드 · 수습 관리 · 계약 관리 ·
+   휴가자 관리뿐이고(src/config/nav.js 의 PMO_RESTRICTED_ROUTES),
+   그중 쓰기는 휴가자 관리의 직원 정보 수정 하나다.
+
+   화면에서 못 하는 일은 API 로도 못 하게 맞춘다. 사업부 범위 검사만
+   있으면, PMO 가 자기 범위 안에서 인력 마스터나 지원금 마스터를
+   API 로 직접 고치는 것을 막지 못한다.
+
+   null = 제한 없음. 객체면 여기 없는 (컬렉션, 메서드) 조합은 거부.
+   --------------------------------------------------------- */
+export const WRITE_PERMISSIONS = {
+  admin: null,
+  pmo: {
+    // 휴가 기간·연계 지원금 항목 수정 (src/views/leave.js)
+    employees: ["PUT", "PATCH"],
+  },
+};
+
+/** 이 역할이 해당 컬렉션에 이 메서드를 쓸 수 있는가 */
+export function canWrite(role, collection, method) {
+  if (!Object.prototype.hasOwnProperty.call(WRITE_PERMISSIONS, role)) return false;
+  const perms = WRITE_PERMISSIONS[role];
+  if (perms === null) return true;
+  const allowed = perms[collection];
+  return Array.isArray(allowed) && allowed.includes(method);
+}
+
 /**
  * 관리자만 통과.
  * 시스템 설정(암호 변경·노출 사업부·알림 기준일)은 관리자 전용 화면이다

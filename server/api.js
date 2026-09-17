@@ -34,6 +34,7 @@ import {
   sessionOf,
   requireAuth,
   requireAdmin,
+  canWrite,
 } from "./auth.js";
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -95,6 +96,20 @@ function warnUnmapped(path, record) {
    그건 표시용이다. 화면을 거치지 않고 API 를 직접 불러도 범위를 넘지
    못하게 하는 것은 여기가 유일하다.
    --------------------------------------------------------- */
+
+/**
+ * 역할이 이 컬렉션에 쓸 수 있는지 검사한다.
+ * 화면에서 도달할 수 없는 곳은 API 로도 막는다 (auth.js 의 WRITE_PERMISSIONS).
+ */
+function ensureCanWrite(req, res, path) {
+  if (canWrite(req.session.role, path, req.method)) return true;
+  res.status(403).json({
+    error: "forbidden",
+    message: "이 작업을 할 권한이 없습니다.",
+    collection: path,
+  });
+  return false;
+}
 
 /** 이 요청의 노출 범위 { divisions, visibleIds } — 설정 조회는 한 번만 */
 function scopeOf(req) {
@@ -259,6 +274,7 @@ export function createApiRouter() {
     wrap(async (req, res) => {
       const path = resolveCollection(req, res);
       if (!path) return;
+      if (!ensureCanWrite(req, res, path)) return;
       const body = requireObjectBody(req, res);
       if (!body) return;
       if (!(await ensureNewInScope(req, res, path, body))) return;
@@ -273,6 +289,7 @@ export function createApiRouter() {
   const replaceHandler = wrap(async (req, res) => {
     const path = resolveCollection(req, res);
     if (!path) return;
+    if (!ensureCanWrite(req, res, path)) return;
     const body = requireObjectBody(req, res);
     if (!body) return;
     if (!(await ensureInScope(req, res, path, req.params.id))) return;
@@ -293,6 +310,7 @@ export function createApiRouter() {
     wrap(async (req, res) => {
       const path = resolveCollection(req, res);
       if (!path) return;
+      if (!ensureCanWrite(req, res, path)) return;
       if (!(await ensureInScope(req, res, path, req.params.id))) return;
       const ok = await repo.remove(path, req.params.id);
       if (!ok) {

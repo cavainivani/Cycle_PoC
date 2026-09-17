@@ -65,7 +65,10 @@ export function renderDbBanner(){
     : "";
 }
 export function renderSampleBanner(){
-  const anySample = Object.values(state).some(arr=>arr.some(d=>d.isSample));
+  // 샘플 정리는 모든 컬렉션을 지운다. 서버는 PMO 에게 employees 수정만
+  // 허용하므로(server/auth.js 의 WRITE_PERMISSIONS) PMO 가 누르면 실패한다.
+  // 할 수 없는 일은 아예 보여주지 않는다.
+  const anySample = authState.role==="admin" && Object.values(state).some(arr=>arr.some(d=>d.isSample));
   byId("sampleBannerSlot").innerHTML = anySample ? `
     <div class="sample-banner">
       <span>${ICON.doc}</span>
